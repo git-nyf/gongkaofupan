@@ -134,3 +134,27 @@
 - `docs/本地运行与数据管理.md`：同步本机访问地址、固定模型、绝对数据目录和 `.env` 本机使用约束。
 - `progress.md`：仅在文件末尾追加本轮修正、验证证据、改动文件清单和回滚方式。
 - 回滚方式：提交后执行 `git revert --no-edit HEAD`；提交前可执行 `git diff --binary d5d2b37 -- .env.example package.json package-lock.json server/app.ts server/config.ts server/index.ts tests/server/health.test.ts tsconfig.app.json tsconfig.server.json vite.config.ts vitest.config.ts docs/本地运行与数据管理.md progress.md > task1-fix.patch` 保存回滚点，再执行 `git apply -R task1-fix.patch` 回滚本轮改动。
+
+## 2026-07-16 - Task: 恢复 SQLite 类型声明依赖
+
+### What was done
+
+- 恢复 `@types/better-sqlite3` 直接开发依赖，为后续服务端 TypeScript 导入 `better-sqlite3` 提供类型声明。
+- 通过 npm 将清单范围和锁文件根范围固定为 `^7.6.12`，并锁定解析版本 `7.6.12` 与完整性哈希。
+- 补充锁文件提交约束和安装后的类型检查说明。
+
+### Testing
+
+- 依赖核对：`npm ls @types/better-sqlite3 --depth=0` 通过，清单范围和锁文件根范围均为 `^7.6.12`，锁文件解析版本为 `7.6.12` 且包含完整性哈希。
+- `npm run typecheck`：通过，前端与服务端 TypeScript 配置均无类型错误。
+- `npx vitest run tests/server/health.test.ts tests/frontend/app.test.tsx`：通过，两个测试文件共八条测试全部通过。
+- `npm run build`：通过，成功生成前端与服务端构建产物。
+- `git diff --check`：通过，未发现空白错误。
+
+### Notes
+
+- `package.json`：恢复 `@types/better-sqlite3@^7.6.12` 直接开发依赖，其他直接依赖保持不变。
+- `package-lock.json`：通过 npm 锁定 `@types/better-sqlite3` 的根依赖范围、解析版本和完整性信息。
+- `docs/本地运行与数据管理.md`：补充 SQLite 类型依赖锁定和安装后类型检查说明。
+- `progress.md`：仅在文件末尾追加本轮依赖修正、验证证据、改动文件清单和回滚方式。
+- 回滚方式：在本任务提交仍为当前 `HEAD` 时执行 `git revert --no-edit HEAD`。
