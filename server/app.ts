@@ -14,11 +14,16 @@ export function createApp() {
   const clientDir = resolve(process.cwd(), 'dist/client');
   if (existsSync(clientDir)) {
     const serveClient = express.static(clientDir);
-    const isReservedPath = (path: string) =>
-      path === '/api' ||
-      path.startsWith('/api/') ||
-      path === '/uploads' ||
-      path.startsWith('/uploads/');
+    const isReservedPath = (path: string) => {
+      const normalizedPath = path.toLowerCase();
+
+      return (
+        normalizedPath === '/api' ||
+        normalizedPath.startsWith('/api/') ||
+        normalizedPath === '/uploads' ||
+        normalizedPath.startsWith('/uploads/')
+      );
+    };
 
     app.use((request, response, next) => {
       if (isReservedPath(request.path)) {

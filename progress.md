@@ -158,3 +158,33 @@
 - `docs/本地运行与数据管理.md`：补充 SQLite 类型依赖锁定和安装后类型检查说明。
 - `progress.md`：仅在文件末尾追加本轮依赖修正、验证证据、改动文件清单和回滚方式。
 - 回滚方式：在本任务提交仍为当前 `HEAD` 时执行 `git revert --no-edit HEAD`。
+
+## 2026-07-16 - Task: 收敛本地服务开发边界
+
+### What was done
+
+- 将 Vite 开发代理改为精确匹配 API 与上传根路径及子路径的正则，并复用经过 Zod 校验的服务端 `PORT` 配置，保持系统环境变量优先于 `.env`。
+- 将生产静态回退的保留路径比较统一转为小写，避免大写 API 与上传路径被前端入口页吞掉。
+- 将生产启动环境固定为 `NODE_ENV=production`，升级到 Multer 2 与配套类型声明，并使 Express 4 运行时与类型声明主版本一致。
+- 将服务端测试临时目录改为系统临时目录下的独占目录，每次只清理本轮创建的目录。
+
+### Testing
+
+- TDD 红灯：先只扩充服务端测试，定向运行两个测试文件共十一条测试，其中三条按预期失败；失败分别证明大写保留路径返回前端页面，以及 Vite 缺少可验证的动态端口与代理边界配置。
+- TDD 绿灯：最小实现后再次运行定向测试，两个测试文件共十一条测试全部通过。
+- `npm run typecheck`：通过，前端与服务端 TypeScript 配置均无类型错误。
+- `npm run build`：通过，成功生成前端与服务端构建产物。
+- `npm ls --depth=0`：通过，顶层依赖树完整；Multer、Multer 类型声明均为 `2.2.0`，Express 类型声明为 `4.17.21`。
+- `npm audit --omit=dev`：通过，生产依赖未发现已知漏洞。
+- `git diff --check`：通过，未发现空白错误。
+
+### Notes
+
+- `package.json`：将生产启动设置为 `NODE_ENV=production`，升级 Multer 2 及配套类型，并将 Express 类型声明调整为 4.x。
+- `package-lock.json`：通过 npm 锁定 Multer 2、Multer 2 类型与 Express 4 类型依赖树和完整性信息。
+- `vite.config.ts`：新增可测试的配置创建函数，按环境配置生成本机代理目标并使用精确正则边界。
+- `server/app.ts`：将前端回退保留路径判断改为大小写不敏感。
+- `tests/server/health.test.ts`：新增开发代理和大写路径边界验证，并使用独占系统临时目录。
+- `docs/本地运行与数据管理.md`：同步可配置端口、生产启动、依赖基线与验证命令。
+- `progress.md`：仅在文件末尾追加本轮修正、验证证据、改动文件清单和回滚方式。
+- 回滚方式：在本任务提交仍为当前 `HEAD` 时执行 `git revert --no-edit HEAD`。

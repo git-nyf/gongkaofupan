@@ -1,13 +1,29 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { resolve } from 'node:path';
+import type { UserConfig } from 'vite';
 import request from 'supertest';
 import { readConfig } from '../../server/config';
 import { createApp } from '../../server/app';
 
 const originalCwd = process.cwd();
-const testRoot = resolve(originalCwd, '.tmp/static-test');
+const testRoot = mkdtempSync(resolve(tmpdir(), 'gongkao-static-test-'));
 const clientDir = resolve(testRoot, 'dist/client');
+
+type ViteConfigFactory = (env: NodeJS.ProcessEnv) => UserConfig;
+
+async function loadViteConfigFactory() {
+  const viteConfigModule = await import('../../vite.config');
+  const factory = Reflect.get(viteConfigModule, 'createViteConfig');
+
+  expect(factory).toBeTypeOf('function');
+  return factory as ViteConfigFactory;
+}
+
+function findProxyContext(proxy: NonNullable<UserConfig['server']>['proxy'], path: string) {
+  return Object.keys(proxy ?? {}).find((context) => new RegExp(context).test(path));
+}
 
 beforeAll(() => {
   mkdirSync(clientDir, { recursive: true });
@@ -83,6 +99,49 @@ describe('生产前端静态服务', () => {
     expect(apiaryResponse.text).toContain('公考记忆卡');
     expect(uploadsOldResponse.status).toBe(200);
     expect(uploadsOldResponse.text).toContain('公考记忆卡');
+  });
+
+  it('大写 API 与上传地址不返回前端入口页面', async () => {
+    const app = createApp();
+    const apiResponse = await request(app).get('/API/missing');
+    const uploadResponse = await request(app).get('/UPLOADS/missing');
+
+    expect(apiResponse.status).toBe(404);
+    expect(uploadResponse.status).toBe(404);
+  });
+});
+
+describe('Vite 开发代理', () => {
+  it('使用服务端配置端口生成 API 与上传代理目标', async () => {
+    const createViteConfig = await loadViteConfigFactory();
+    const proxy = createViteConfig({ PORT: '9123' }).server?.proxy;
+    const apiContext = findProxyContext(proxy, '/api');
+    const uploadContext = findProxyContext(proxy, '/uploads');
+
+    expect(apiContext).toBeDefined();
+    expect(uploadContext).toBeDefined();
+    expect(proxy?.[apiContext!]).toBe('http://127.0.0.1:9123');
+    expect(proxy?.[uploadContext!]).toBe('http://127.0.0.1:9123');
+  });
+
+  it('代理正则仅匹配 API 与上传根路径及子路径', async () => {
+    const createViteConfig = await loadViteConfigFactory();
+    const proxy = createViteConfig({ PORT: '9123' }).server?.proxy;
+    const apiContext = findProxyContext(proxy, '/api');
+    const uploadContext = findProxyContext(proxy, '/uploads');
+
+    expect(apiContext?.startsWith('^')).toBe(true);
+    expect(uploadContext?.startsWith('^')).toBe(true);
+
+    const apiPattern = new RegExp(apiContext!);
+    const uploadPattern = new RegExp(uploadContext!);
+
+    expect(apiPattern.test('/api')).toBe(true);
+    expect(apiPattern.test('/api/cards')).toBe(true);
+    expect(apiPattern.test('/apiary')).toBe(false);
+    expect(uploadPattern.test('/uploads')).toBe(true);
+    expect(uploadPattern.test('/uploads/image.png')).toBe(true);
+    expect(uploadPattern.test('/uploads-old')).toBe(false);
   });
 });
 
