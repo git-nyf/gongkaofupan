@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest';
+import { readdirSync, statSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { createTestDatabase } from '../helpers/testDatabase';
 import * as databaseModule from '../../server/db/database';
@@ -170,5 +171,89 @@ describe('数据库初始化', () => {
 
     expect(categoryCount.count).toBe(69);
     expect(migrationCount.count).toBe(1);
+  });
+
+  it('拒绝损坏替换源并保持原数据库可用且能够再次替换', () => {
+    const testDatabase = createTestDatabase();
+    opened.push(testDatabase);
+    testDatabase.db
+      .prepare("INSERT INTO app_settings (key, value_json) VALUES ('target-marker', '\"original\"')")
+      .run();
+    const corruptPath = resolve(testDatabase.directory, 'corrupt.db');
+    writeFileSync(corruptPath, Buffer.from('not-sqlite'));
+
+    expect(() => testDatabase.manager.replaceFrom(corruptPath)).toThrow();
+    expect(testDatabase.db.prepare("SELECT value_json FROM app_settings WHERE key = 'target-marker'").get()).toEqual({
+      value_json: '"original"',
+    });
+
+    const validPath = resolve(testDatabase.directory, 'valid.db');
+    const validManager = createDatabaseManager(validPath);
+    migrate(validManager.get());
+    validManager
+      .get()
+      .prepare("INSERT INTO app_settings (key, value_json) VALUES ('replacement-marker', '\"valid\"')")
+      .run();
+    validManager.close();
+
+    testDatabase.manager.replaceFrom(validPath);
+
+    expect(testDatabase.db.prepare("SELECT value_json FROM app_settings WHERE key = 'replacement-marker'").get()).toEqual({
+      value_json: '"valid"',
+    });
+    expect(
+      readdirSync(testDatabase.directory).filter(
+        (name) => name.includes('.restore-') || name.includes('.rollback-'),
+      ),
+    ).toEqual([]);
+    expect(() => testDatabase.manager.close()).not.toThrow();
+    expect(() => testDatabase.manager.close()).not.toThrow();
+  });
+
+  it('替换打开中的 WAL 数据库时保留尚未检查点的全部数据', () => {
+    const target = createTestDatabase();
+    const source = createTestDatabase();
+    opened.push(target, source);
+    source.db.pragma('wal_checkpoint(TRUNCATE)');
+    source.db.pragma('wal_autocheckpoint = 0');
+    const insertSetting = source.db.prepare('INSERT INTO app_settings (key, value_json) VALUES (?, ?)');
+    insertSetting.run('wal-marker-1', '"first"');
+    insertSetting.run('wal-marker-2', '"second"');
+    const sourcePath = resolve(source.directory, 'gongkao.db');
+
+    expect(statSync(`${sourcePath}-wal`).size).toBeGreaterThan(0);
+
+    target.manager.replaceFrom(sourcePath);
+
+    expect(
+      target.db
+        .prepare("SELECT key, value_json FROM app_settings WHERE key LIKE 'wal-marker-%' ORDER BY key")
+        .all(),
+    ).toEqual([
+      { key: 'wal-marker-1', value_json: '"first"' },
+      { key: 'wal-marker-2', value_json: '"second"' },
+    ]);
+  });
+
+  it('测试资源动态获取替换后的连接而不缓存裸连接', () => {
+    const testDatabase = createTestDatabase();
+    opened.push(testDatabase);
+    const cachedConnection = testDatabase.db;
+    const replacementPath = resolve(testDatabase.directory, 'replacement-with-data.db');
+    const replacementManager = createDatabaseManager(replacementPath);
+    migrate(replacementManager.get());
+    replacementManager
+      .get()
+      .prepare("INSERT INTO app_settings (key, value_json) VALUES ('dynamic-marker', '\"current\"')")
+      .run();
+    replacementManager.close();
+
+    testDatabase.manager.replaceFrom(replacementPath);
+
+    expect(testDatabase.db).not.toBe(cachedConnection);
+    expect(testDatabase.db).toBe(testDatabase.manager.get());
+    expect(testDatabase.db.prepare("SELECT value_json FROM app_settings WHERE key = 'dynamic-marker'").get()).toEqual({
+      value_json: '"current"',
+    });
   });
 });

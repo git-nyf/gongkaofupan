@@ -10,7 +10,9 @@ export function createTestDatabase() {
   migrate(manager.get());
 
   return {
-    db: manager.get(),
+    get db() {
+      return manager.get();
+    },
     manager,
     directory,
     dispose() {
