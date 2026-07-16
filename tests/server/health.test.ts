@@ -124,7 +124,7 @@ describe('Vite 开发代理', () => {
     expect(proxy?.[uploadContext!]).toBe('http://127.0.0.1:9123');
   });
 
-  it('代理正则仅匹配 API 与上传根路径及子路径', async () => {
+  it('代理正则大小写不敏感且不匹配相似前缀', async () => {
     const createViteConfig = await loadViteConfigFactory();
     const proxy = createViteConfig({ PORT: '9123' }).server?.proxy;
     const apiContext = findProxyContext(proxy, '/api');
@@ -138,10 +138,24 @@ describe('Vite 开发代理', () => {
 
     expect(apiPattern.test('/api')).toBe(true);
     expect(apiPattern.test('/api/cards')).toBe(true);
+    expect(apiPattern.test('/API')).toBe(true);
+    expect(apiPattern.test('/API/cards')).toBe(true);
     expect(apiPattern.test('/apiary')).toBe(false);
     expect(uploadPattern.test('/uploads')).toBe(true);
     expect(uploadPattern.test('/uploads/image.png')).toBe(true);
+    expect(uploadPattern.test('/UPLOADS')).toBe(true);
+    expect(uploadPattern.test('/UPLOADS/image.png')).toBe(true);
     expect(uploadPattern.test('/uploads-old')).toBe(false);
+  });
+
+  it('代理正则匹配带查询参数的根路径', async () => {
+    const createViteConfig = await loadViteConfigFactory();
+    const proxy = createViteConfig({ PORT: '9123' }).server?.proxy;
+    const apiContext = findProxyContext(proxy, '/api');
+    const uploadContext = findProxyContext(proxy, '/uploads');
+
+    expect(new RegExp(apiContext!).test('/api?x=1')).toBe(true);
+    expect(new RegExp(uploadContext!).test('/uploads?download=1')).toBe(true);
   });
 });
 

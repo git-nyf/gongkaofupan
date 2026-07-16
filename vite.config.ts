@@ -11,8 +11,8 @@ export function createViteConfig(env: NodeJS.ProcessEnv): UserConfig {
     server: {
       port: 5173,
       proxy: {
-        '^/api(?:/|$)': proxyTarget,
-        '^/uploads(?:/|$)': proxyTarget,
+        '^/[aA][pP][iI](?:/|\\?|$)': proxyTarget,
+        '^/[uU][pP][lL][oO][aA][dD][sS](?:/|\\?|$)': proxyTarget,
       },
     },
   };
