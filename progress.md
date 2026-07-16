@@ -44,6 +44,45 @@
 - `progress.md`：追加本轮实施计划的完成内容、验证证据、文件清单和回滚方式。
 - 回滚方式：在本任务提交仍为当前 `HEAD` 时执行 `git revert --no-edit HEAD`。
 
+## 2026-07-16 - Task: 建立本地应用工程骨架
+
+### What was done
+
+- 建立 React、Vite、Express 与 TypeScript 的本地前后端工程骨架，补齐开发、构建、启动、测试、类型检查和端到端测试脚本。
+- 提供健康检查、Zod 环境配置、生产前端静态资源与路由回退，并确保未知接口和上传地址不会返回前端入口页。
+- 提供最小产品首页、依赖锁定、环境变量示例和本地运行及数据管理说明。
+
+### Testing
+
+- `npx vitest run tests/server/health.test.ts tests/frontend/app.test.tsx`：通过，两个测试文件共五条测试全部通过。
+- `npm run typecheck`：通过，前端与服务端 TypeScript 配置均无类型错误。
+- `npm run build`：通过，成功生成 `dist/client` 与 `dist-server/index.js`。
+- 构建服务冒烟验证通过：健康接口返回 `ok`，前端路由返回 200 且包含“公考记忆卡”。
+- `git diff --check`：通过，未发现空白错误。
+
+### Notes
+
+- `.gitignore`：保留工作树忽略规则并新增依赖、构建、环境、数据及测试产物忽略项。
+- `.env.example`：新增仅含空 DeepSeek 密钥及默认服务配置的环境示例。
+- `package.json`：新增依赖清单与开发、构建、启动和验证脚本。
+- `package-lock.json`：锁定本轮安装的 npm 依赖版本。
+- `tsconfig.app.json`：新增前端和前端测试的严格类型检查配置。
+- `tsconfig.server.json`：新增服务端和服务端测试的严格类型检查配置。
+- `vite.config.ts`：新增 React 构建配置及 `/api`、`/uploads` 开发代理。
+- `vitest.config.ts`：新增默认 Node 测试环境、初始化文件和自动 JSX 转换配置。
+- `index.html`：新增前端应用入口页面。
+- `src/App.tsx`：新增显示产品名称的最小应用组件。
+- `src/main.tsx`：新增基于 `createRoot` 的 React 挂载入口。
+- `server/config.ts`：新增基于 Zod 的端口、数据目录和 DeepSeek 配置读取。
+- `server/app.ts`：新增健康接口、生产静态资源服务及前端路由回退。
+- `server/index.ts`：新增环境加载和 Express 服务启动入口。
+- `tests/setup.ts`：新增 Testing Library 断言扩展初始化。
+- `tests/server/health.test.ts`：新增健康接口、默认配置和生产静态服务测试。
+- `tests/frontend/app.test.tsx`：新增产品名称渲染测试。
+- `docs/本地运行与数据管理.md`：新增 Node 版本、安装、开发、构建、地址、数据目录和密钥提交约束说明。
+- `progress.md`：追加本轮实现、验证证据、文件清单和回滚方式。
+- 回滚方式：在本任务提交仍为当前 `HEAD` 时执行 `git revert --no-edit HEAD`。
+
 ## 2026-07-16 - Task: 建立多智能体施工隔离目录
 
 ### What was done

@@ -1,0 +1,36 @@
+import express from 'express';
+import { existsSync } from 'node:fs';
+import { resolve } from 'node:path';
+
+export function createApp() {
+  const app = express();
+
+  app.get('/api/health', (_request, response) => {
+    response.status(200).json({ status: 'ok' });
+  });
+
+  const clientDir = resolve(process.cwd(), 'dist/client');
+  if (existsSync(clientDir)) {
+    const serveClient = express.static(clientDir);
+
+    app.use((request, response, next) => {
+      if (request.path.startsWith('/api') || request.path.startsWith('/uploads')) {
+        next();
+        return;
+      }
+
+      serveClient(request, response, next);
+    });
+
+    app.get('*', (request, response, next) => {
+      if (request.path.startsWith('/api') || request.path.startsWith('/uploads')) {
+        next();
+        return;
+      }
+
+      response.sendFile(resolve(clientDir, 'index.html'));
+    });
+  }
+
+  return app;
+}
