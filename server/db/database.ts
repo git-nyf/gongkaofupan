@@ -70,39 +70,35 @@ export function createDatabaseManager(filePath: string) {
     replaceFrom(replacementPath: string) {
       const temporaryPath = `${filePath}.restore-${randomUUID()}`;
       const rollbackPath = `${filePath}.rollback-${randomUUID()}`;
-
-      try {
-        prepareReplacement(replacementPath, temporaryPath);
-      } catch (error) {
-        removeDatabaseFiles(temporaryPath);
-        throw error;
-      }
-
-      closeDatabase(database);
       let rollbackExists = false;
 
       try {
-        renameSync(filePath, rollbackPath);
-        rollbackExists = true;
-        renameSync(temporaryPath, filePath);
-        database = openDatabase(filePath);
-        removeDatabaseFiles(rollbackPath);
-        rollbackExists = false;
-      } catch (error) {
+        prepareReplacement(replacementPath, temporaryPath);
         closeDatabase(database);
 
         try {
-          if (rollbackExists) {
-            removeDatabaseFiles(filePath);
-            renameSync(rollbackPath, filePath);
-            rollbackExists = false;
-          }
+          renameSync(filePath, rollbackPath);
+          rollbackExists = true;
+          renameSync(temporaryPath, filePath);
           database = openDatabase(filePath);
-        } catch (restoreError) {
-          throw new AggregateError([error, restoreError], '数据库替换失败，原数据库恢复也失败');
-        }
+          removeDatabaseFiles(rollbackPath);
+          rollbackExists = false;
+        } catch (error) {
+          closeDatabase(database);
 
-        throw error;
+          try {
+            if (rollbackExists) {
+              removeDatabaseFiles(filePath);
+              renameSync(rollbackPath, filePath);
+              rollbackExists = false;
+            }
+            database = openDatabase(filePath);
+          } catch (restoreError) {
+            throw new AggregateError([error, restoreError], '数据库替换失败，原数据库恢复也失败');
+          }
+
+          throw error;
+        }
       } finally {
         removeDatabaseFiles(temporaryPath);
         if (!rollbackExists) {

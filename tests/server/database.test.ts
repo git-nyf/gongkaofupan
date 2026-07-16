@@ -256,4 +256,42 @@ describe('数据库初始化', () => {
       value_json: '"current"',
     });
   });
+
+  it('忙查询拒绝替换时清理暂存并在释放查询后允许重试', () => {
+    const testDatabase = createTestDatabase();
+    opened.push(testDatabase);
+    testDatabase.db
+      .prepare("INSERT INTO app_settings (key, value_json) VALUES ('busy-target-marker', '\"original\"')")
+      .run();
+    const replacementPath = resolve(testDatabase.directory, 'busy-replacement.db');
+    const replacementManager = createDatabaseManager(replacementPath);
+    migrate(replacementManager.get());
+    replacementManager
+      .get()
+      .prepare("INSERT INTO app_settings (key, value_json) VALUES ('busy-replacement-marker', '\"current\"')")
+      .run();
+    replacementManager.close();
+    const iterator = testDatabase.db.prepare('SELECT id FROM categories ORDER BY id').iterate();
+    expect(iterator.next().done).toBe(false);
+
+    try {
+      expect(() => testDatabase.manager.replaceFrom(replacementPath)).toThrow(/busy executing a query/);
+      expect(
+        testDatabase.db.prepare("SELECT value_json FROM app_settings WHERE key = 'busy-target-marker'").get(),
+      ).toEqual({ value_json: '"original"' });
+      expect(
+        readdirSync(testDatabase.directory).filter(
+          (name) => name.includes('.restore-') || name.includes('.rollback-'),
+        ),
+      ).toEqual([]);
+    } finally {
+      iterator.return?.();
+    }
+
+    testDatabase.manager.replaceFrom(replacementPath);
+
+    expect(
+      testDatabase.db.prepare("SELECT value_json FROM app_settings WHERE key = 'busy-replacement-marker'").get(),
+    ).toEqual({ value_json: '"current"' });
+  });
 });
