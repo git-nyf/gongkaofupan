@@ -43,3 +43,20 @@
 - `docs/superpowers/plans/2026-07-16-公考记忆卡基础版实施计划.md`：新增可按任务直接执行的完整基础版施工计划。
 - `progress.md`：追加本轮实施计划的完成内容、验证证据、文件清单和回滚方式。
 - 回滚方式：在本任务提交仍为当前 `HEAD` 时执行 `git revert --no-edit HEAD`。
+
+## 2026-07-16 - Task: 建立多智能体施工隔离目录
+
+### What was done
+
+- 为公考记忆卡基础版施工预留项目内 Git 工作树目录，并确保该目录不会被版本库跟踪。
+
+### Testing
+
+- 已确认当前位于普通 `master` 工作区而非既有工作树，且工作区无未提交改动。
+- 将在提交后使用 `git check-ignore .worktrees` 验证忽略规则生效，并用 `git worktree list` 验证隔离工作树创建结果。
+
+### Notes
+
+- `.gitignore`：新增 `.worktrees/` 忽略规则，防止工作树内容进入主仓库状态。
+- `progress.md`：追加本轮隔离目录准备的记录与回滚方式。
+- 回滚方式：在本任务提交仍为当前 `HEAD` 时执行 `git revert --no-edit HEAD`。
