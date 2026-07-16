@@ -297,3 +297,37 @@
 - `docs/本地运行与数据管理.md`：补充忙查询时拒绝替换、清理暂存和释放后重试说明。
 - `progress.md`：仅在文件末尾追加本轮修复、验证证据、改动文件清单和回滚方式。
 - 回滚方式：在本任务提交仍为当前 `HEAD` 时执行 `git revert --no-edit HEAD`。
+
+## 2026-07-17 - Task: 建立 DeepSeek 严格结构化契约
+
+### What was done
+
+- 建立卡片录入、规范结果、详情、复习调度和学习题面的共享类型契约，供后续前后端复用同一业务名称。
+- 建立 DeepSeek 结构校验、事实保护提示词和 OpenAI 兼容请求提供者，固定模型、关闭思考模式并隔离系统规则与用户 JSON 数据。
+- 对空响应、非法 JSON 和结构失败限定一次重试，对 HTTP 错误和 20 秒超时直接失败；所有错误只暴露受限错误码，不携带密钥或原始响应。
+- 补充确定性测试提供者和本机密钥、数据外发、超时重试边界说明。
+
+### Testing
+
+- TDD 初始红灯：先只创建两份 AI 测试并运行 `npx vitest run tests/server/ai-schema.test.ts tests/server/deepseek.test.ts`，两个测试文件均因 `server/ai/schema` 与 `server/ai/prompt` 不存在而在收集阶段按预期失败。
+- TDD 超时红灯：使用 Node 实际的 `TimeoutError` 语义运行 `npx vitest run tests/server/deepseek.test.ts`，十条测试中一条按预期失败，证明超时被误映射为 `http_error`；最小修复后 AI 专项两文件二十九条测试全部通过。
+- TDD 角色边界红灯：增加两句设计原文的精确断言后运行 `npx vitest run tests/server/deepseek.test.ts`，十条测试中一条按预期失败；恢复提示词角色边界后十条全部通过。
+- `npx vitest run tests/server/ai-schema.test.ts tests/server/deepseek.test.ts`：通过，两份测试文件共二十九条测试全部通过，未发送真实网络请求。
+- `npm test`：通过，五个测试文件共五十一条测试全部通过。
+- `npm run typecheck`：通过，前端与服务端 TypeScript 配置均无类型错误。
+- `npm run build`：通过，成功生成前端与服务端构建产物。
+- `git diff --check`：通过；包文件、应用入口、配置和数据库范围未改动，仓库与构建产物未发现真实密钥模式，`.env.example` 密钥值保持为空。
+
+### Notes
+
+- `shared/contracts.ts`：新增录入、规范结果、卡片详情、复习调度和学习题面的唯一共享类型。
+- `server/ai/prompt.ts`：新增严格角色边界、九条事实保护规则和六个固定边界样例。
+- `server/ai/schema.ts`：新增字段长度、枚举、题面数量和方向关系的 Zod 校验。
+- `server/ai/provider.ts`：新增只含 `normalize` 方法的 AI 提供者接口。
+- `server/ai/deepseek.ts`：新增固定模型的 DeepSeek 请求、20 秒超时、限定重试和脱敏错误处理。
+- `tests/helpers/fakeAiProvider.ts`：新增返回预设规范结果的确定性测试提供者。
+- `tests/server/ai-schema.test.ts`：新增规范结果、方向关系、数量和长度边界测试。
+- `tests/server/deepseek.test.ts`：新增提示词、请求隔离、重试边界、超时、HTTP 错误和脱敏测试。
+- `docs/本地运行与数据管理.md`：补充 AI 契约测试命令、本机新密钥、旧密钥撤销、数据外发和重试边界说明。
+- `progress.md`：仅在文件末尾追加本轮实现、验证证据、改动文件清单和回滚方式。
+- 回滚方式：在本任务提交仍为当前 `HEAD` 时执行 `git revert --no-edit HEAD`。
