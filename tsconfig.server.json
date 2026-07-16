@@ -12,5 +12,5 @@
     "strict": true,
     "types": ["node", "vitest/globals"]
   },
-  "include": ["server", "tests/server"]
+  "include": ["server", "shared", "tests/server"]
 }

@@ -99,3 +99,38 @@
 - `.gitignore`：新增 `.worktrees/` 忽略规则，防止工作树内容进入主仓库状态。
 - `progress.md`：追加本轮隔离目录准备的记录与回滚方式。
 - 回滚方式：在本任务提交仍为当前 `HEAD` 时执行 `git revert --no-edit HEAD`。
+
+## 2026-07-16 - Task: 修正本地应用工程骨架规格偏差
+
+### What was done
+
+- 将 DeepSeek 模型固定为 `deepseek-v4-flash`，把数据目录解析为绝对路径，并保持环境配置由 Zod 严格校验。
+- 为所有路由启用 2MB JSON 请求体解析与大小限制，收紧前端回退的保留路径判断，使 `/apiary`、`/uploads-old` 等正常前端路径仍可访问。
+- 将前后端开发与运行服务限制为仅监听本机，补齐测试隔离、共享类型目录覆盖，并将编辑器依赖收敛到批准清单。
+- 同步本机访问地址、固定模型、绝对数据目录和本机环境文件使用说明。
+
+### Testing
+
+- TDD 红灯：首次运行 `npx vitest run tests/server/health.test.ts tests/frontend/app.test.tsx`，共八条测试，其中四条按预期失败；失败分别证明正常 JSON 未解析、超过 2MB 的 JSON 返回 404、相似前缀未回退前端、默认配置仍返回相对目录与旧模型名。
+- TDD 绿灯：实现后再次运行同一命令，两个测试文件共八条测试全部通过。
+- `npm run typecheck`：通过，前端与服务端 TypeScript 配置均无类型错误。
+- `npm run build`：通过，成功生成前端与服务端构建产物。
+- 构建服务冒烟验证：健康检查精确返回 `{"status":"ok"}`，监听地址精确为 `127.0.0.1`。
+- `git diff --check`：通过；依赖清单、改动范围、空示例密钥和疑似真实密钥检查均通过；验证环境 Node.js 版本为 `v22.19.0`。
+
+### Notes
+
+- `.env.example`：将示例模型名修正为固定的 `deepseek-v4-flash`，密钥继续保持为空。
+- `package.json`：将 Vite 开发地址限制为 `127.0.0.1`，并按批准清单调整 Tiptap 直接依赖。
+- `package-lock.json`：通过 npm 正常锁定批准后的 Tiptap 依赖集合。
+- `server/app.ts`：在路由前启用 2MB JSON 解析，并精确区分保留路径与相似前端路径。
+- `server/config.ts`：使用 Zod literal 固定模型名，并将数据目录解析为绝对路径。
+- `server/index.ts`：将 Express 服务监听地址固定为 `127.0.0.1`。
+- `tests/server/health.test.ts`：新增 JSON 解析、请求体上限、精确回退边界、绝对数据目录和固定模型行为验证。
+- `tsconfig.app.json`：将 `shared` 纳入前端类型检查范围。
+- `tsconfig.server.json`：将 `shared` 纳入服务端类型检查范围。
+- `vite.config.ts`：将 `/api` 与 `/uploads` 代理目标改为 `http://127.0.0.1:8787`。
+- `vitest.config.ts`：启用 `clearMocks`，隔离不同测试之间的模拟状态。
+- `docs/本地运行与数据管理.md`：同步本机访问地址、固定模型、绝对数据目录和 `.env` 本机使用约束。
+- `progress.md`：仅在文件末尾追加本轮修正、验证证据、改动文件清单和回滚方式。
+- 回滚方式：提交后执行 `git revert --no-edit HEAD`；提交前可执行 `git diff --binary d5d2b37 -- .env.example package.json package-lock.json server/app.ts server/config.ts server/index.ts tests/server/health.test.ts tsconfig.app.json tsconfig.server.json vite.config.ts vitest.config.ts docs/本地运行与数据管理.md progress.md > task1-fix.patch` 保存回滚点，再执行 `git apply -R task1-fix.patch` 回滚本轮改动。

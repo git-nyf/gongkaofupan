@@ -17,6 +17,7 @@
   },
   "include": [
     "src",
+    "shared",
     "tests/frontend",
     "tests/setup.ts",
     "vite.config.ts",
