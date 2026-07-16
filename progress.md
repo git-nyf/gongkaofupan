@@ -331,3 +331,30 @@
 - `docs/本地运行与数据管理.md`：补充 AI 契约测试命令、本机新密钥、旧密钥撤销、数据外发和重试边界说明。
 - `progress.md`：仅在文件末尾追加本轮实现、验证证据、改动文件清单和回滚方式。
 - 回滚方式：在本任务提交仍为当前 `HEAD` 时执行 `git revert --no-edit HEAD`。
+
+## 2026-07-17 - Task: 补全 AI 契约规格边界
+
+### What was done
+
+- 将系统提示词第 4、6、7 条恢复为设计原文，精确限定双向题、无法安全造题和用户手动分类的处理边界。
+- 补齐题面与答案在一万字时通过、一万零一字时拒绝的参数化结构校验测试，不改变已经正确的结构校验实现。
+- 将录入模式 `entry_mode` 补入 DeepSeek 数据外发字段清单，使运行文档与实际用户 JSON 一致。
+
+### Testing
+
+- TDD 提示词红灯：先增加第 4、6、7 条设计原文的精确断言并运行 `npx vitest run tests/server/deepseek.test.ts`，十条测试中一条按预期失败，证明现有提示词缺少第 4 条精确原文；恢复三条原文并将对应旧简写期望替换为精确契约后，十条测试全部通过。
+- 结构边界覆盖补充：只增加 `question` 与 `answer` 的 10000/10001 字参数化用例后运行 `npx vitest run tests/server/ai-schema.test.ts`，二十二条测试直接全部通过，证明现有结构校验已正确执行长度上限，本轮未修改 `server/ai/schema.ts`。
+- `npx vitest run tests/server/ai-schema.test.ts tests/server/deepseek.test.ts`：通过，两份测试文件共三十二条测试全部通过。
+- `npm test`：通过，五个测试文件共五十四条测试全部通过。
+- `npm run typecheck`：通过，前端与服务端 TypeScript 配置均无类型错误。
+- `npm run build`：通过，成功生成前端与服务端构建产物。
+- `git diff --check`：通过；改动范围仅包含本轮五个允许文件，仓库与构建产物未发现真实密钥模式。
+
+### Notes
+
+- `server/ai/prompt.ts`：恢复第 4、6、7 条设计原文的精确语义。
+- `tests/server/deepseek.test.ts`：将三条提示词边界固定为设计原文精确断言。
+- `tests/server/ai-schema.test.ts`：参数化覆盖题面与答案恰好达到和超过一万字的边界。
+- `docs/本地运行与数据管理.md`：在 DeepSeek 外发字段中补充录入模式 `entry_mode`。
+- `progress.md`：仅在文件末尾追加本轮规格修正、验证证据、改动文件清单和回滚方式。
+- 回滚方式：在本任务提交仍为当前 `HEAD` 时执行 `git revert --no-edit HEAD`。

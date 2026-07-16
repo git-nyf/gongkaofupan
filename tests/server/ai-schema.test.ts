@@ -93,13 +93,25 @@ describe('AI 结构校验', () => {
     expect(() => normalizedCardSchema.parse(value)).toThrow();
   });
 
-  it('拒绝超过 10000 字的题面', () => {
-    expect(() =>
+  it.each([
+    { field: 'question' as const, length: 10_000, accepted: true },
+    { field: 'question' as const, length: 10_001, accepted: false },
+    { field: 'answer' as const, length: 10_000, accepted: true },
+    { field: 'answer' as const, length: 10_001, accepted: false },
+  ])('$field 为 $length 字时按上限校验', ({ field, length, accepted }) => {
+    const parse = () =>
       normalizedCardSchema.parse({
         ...baseCard,
-        quiz_items: [{ direction: 'single', question: '题'.repeat(10_001), answer: 'B' }],
-      }),
-    ).toThrow();
+        quiz_items: [
+          { ...baseCard.quiz_items[0], [field]: (field === 'question' ? '题' : '答').repeat(length) },
+        ],
+      });
+
+    if (accepted) {
+      expect(parse().quiz_items[0]?.[field]).toHaveLength(length);
+    } else {
+      expect(parse).toThrow();
+    }
   });
 
   it.each(['normalized_statement', 'wrong_point', 'analysis', 'mnemonic', 'extension', 'notes'] as const)(
