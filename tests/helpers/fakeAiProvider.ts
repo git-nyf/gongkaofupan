@@ -4,7 +4,7 @@ import type { AiProvider } from '../../server/ai/provider';
 export function createFakeAiProvider(result: NormalizedCard): AiProvider {
   return {
     async normalize() {
-      return result;
+      return structuredClone(result);
     },
   };
 }

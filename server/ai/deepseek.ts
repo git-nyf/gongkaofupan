@@ -76,24 +76,26 @@ export class DeepSeekAiProvider implements AiProvider {
         },
       );
     } catch (error) {
-      if (
-        error instanceof DOMException &&
-        (error.name === 'TimeoutError' || error.name === 'AbortError')
-      ) {
-        throw new DeepSeekError('timeout');
-      }
-      throw new DeepSeekError('http_error');
+      throw new DeepSeekError(isTimeoutError(error) ? 'timeout' : 'http_error');
     }
 
     if (!response.ok) {
+      try {
+        await response.body?.cancel();
+      } catch {
+        // HTTP 错误保持统一脱敏，不暴露响应体释放失败信息。
+      }
       throw new DeepSeekError('http_error');
     }
 
     let responseBody: unknown;
     try {
       responseBody = await response.json();
-    } catch {
-      throw new DeepSeekError('invalid_json');
+    } catch (error) {
+      if (isTimeoutError(error)) {
+        throw new DeepSeekError('timeout');
+      }
+      throw new DeepSeekError(error instanceof SyntaxError ? 'invalid_json' : 'http_error');
     }
 
     const content = readContent(responseBody);
@@ -131,4 +133,11 @@ function readContent(responseBody: unknown): string | null {
   if (typeof message !== 'object' || message === null) return null;
   const content = Reflect.get(message, 'content');
   return typeof content === 'string' ? content : null;
+}
+
+function isTimeoutError(error: unknown): boolean {
+  return (
+    error instanceof DOMException &&
+    (error.name === 'TimeoutError' || error.name === 'AbortError')
+  );
 }

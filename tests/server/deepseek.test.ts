@@ -1,7 +1,8 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { NormalizeCardInput, NormalizedCard } from '../../shared/contracts';
 import { DEEPSEEK_SYSTEM_PROMPT } from '../../server/ai/prompt';
 import { DeepSeekError, createDeepSeekProvider } from '../../server/ai/deepseek';
+import { createFakeAiProvider } from '../helpers/fakeAiProvider';
 
 const apiKey = 'unit-test-secret-key';
 const config = { apiKey, baseUrl: 'https://unit.test/v1/' };
@@ -48,6 +49,19 @@ function errorText(error: unknown) {
   if (!(error instanceof Error)) return String(error);
   return JSON.stringify(error, Object.getOwnPropertyNames(error));
 }
+
+function responseWithJsonError(error: unknown) {
+  const response = new Response('{}', {
+    status: 200,
+    headers: { 'content-type': 'application/json' },
+  });
+  vi.spyOn(response, 'json').mockRejectedValue(error);
+  return response;
+}
+
+afterEach(() => {
+  vi.restoreAllMocks();
+});
 
 describe('DeepSeek 系统提示词', () => {
   it('完整包含事实保护九条规则和固定样例', () => {
@@ -115,18 +129,16 @@ describe('DeepSeek 请求', () => {
     expect(JSON.parse(body.messages[1]!.content)).toEqual(input);
     expect(timeoutSpy).toHaveBeenCalledWith(20_000);
     expect(init?.signal).toBeInstanceOf(AbortSignal);
-    timeoutSpy.mockRestore();
   });
 });
 
 describe('DeepSeek 重试与错误边界', () => {
   it.each([
-    { name: '空响应', first: apiResponse(''), expectedCode: 'empty_response' },
-    { name: '非法 JSON', first: apiResponse('{invalid'), expectedCode: 'invalid_json' },
+    { name: '空响应', first: apiResponse('') },
+    { name: '非法 JSON', first: apiResponse('{invalid') },
     {
       name: 'schema 不合法',
       first: apiResponse(JSON.stringify({ ...normalizedCard, quiz_items: [] })),
-      expectedCode: 'invalid_schema',
     },
   ])('$name 只重试一次并可在第二次成功', async ({ first }) => {
     const fetchMock = vi
@@ -190,5 +202,104 @@ describe('DeepSeek 重试与错误边界', () => {
     expect(error).toMatchObject({ code: 'timeout' });
     expect(errorText(error)).not.toContain(apiKey);
     expect(errorText(error)).not.toContain('Authorization');
+  });
+
+  it('读取外层 JSON 超时不重试并返回 timeout', async () => {
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValue(
+        responseWithJsonError(new DOMException(`Authorization: Bearer ${apiKey}`, 'TimeoutError')),
+      );
+    const provider = createDeepSeekProvider(config, fetchMock);
+
+    const error = await provider.normalize(input).catch((caught: unknown) => caught);
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(error).toBeInstanceOf(DeepSeekError);
+    expect(error).toMatchObject({ code: 'timeout' });
+    expect(errorText(error)).not.toContain(apiKey);
+    expect(errorText(error)).not.toContain('Authorization');
+  });
+
+  it('读取外层 JSON 断流不重试并返回 http_error', async () => {
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValue(responseWithJsonError(new TypeError(`Authorization: Bearer ${apiKey}`)));
+    const provider = createDeepSeekProvider(config, fetchMock);
+
+    const error = await provider.normalize(input).catch((caught: unknown) => caught);
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(error).toBeInstanceOf(DeepSeekError);
+    expect(error).toMatchObject({ code: 'http_error' });
+    expect(errorText(error)).not.toContain(apiKey);
+    expect(errorText(error)).not.toContain('Authorization');
+  });
+
+  it('外层 HTTP 正文为非法 JSON 时重试一次并可成功', async () => {
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(
+        new Response('{invalid', {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        }),
+      )
+      .mockResolvedValueOnce(apiResponse(JSON.stringify(normalizedCard)));
+    const provider = createDeepSeekProvider(config, fetchMock);
+
+    await expect(provider.normalize(input)).resolves.toEqual(normalizedCard);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('HTTP 错误释放响应体且不重试', async () => {
+    const cancel = vi.fn();
+    const response = new Response(new ReadableStream({ cancel }), { status: 503 });
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(response);
+    const provider = createDeepSeekProvider(config, fetchMock);
+
+    const error = await provider.normalize(input).catch((caught: unknown) => caught);
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(cancel).toHaveBeenCalledTimes(1);
+    expect(error).toBeInstanceOf(DeepSeekError);
+    expect(error).toMatchObject({ code: 'http_error' });
+    expect(errorText(error)).not.toContain(apiKey);
+  });
+
+  it('释放 HTTP 错误响应体失败时仍返回脱敏 http_error', async () => {
+    const sensitiveCancelError = `Authorization: Bearer ${apiKey}`;
+    const cancel = vi.fn(() => Promise.reject(new Error(sensitiveCancelError)));
+    const response = new Response(new ReadableStream({ cancel }), { status: 503 });
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(response);
+    const provider = createDeepSeekProvider(config, fetchMock);
+
+    const error = await provider.normalize(input).catch((caught: unknown) => caught);
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(cancel).toHaveBeenCalledTimes(1);
+    expect(error).toBeInstanceOf(DeepSeekError);
+    expect(error).toMatchObject({ code: 'http_error' });
+    expect(errorText(error)).not.toContain(apiKey);
+    expect(errorText(error)).not.toContain('Authorization');
+    expect(errorText(error)).not.toContain(sensitiveCancelError);
+  });
+});
+
+describe('确定性 AI 提供者', () => {
+  it('每次调用返回互不共享引用的结果', async () => {
+    const provider = createFakeAiProvider(normalizedCard);
+
+    const first = await provider.normalize(input);
+    const second = await provider.normalize(input);
+
+    expect(first).not.toBe(second);
+    expect(first.tags).not.toBe(second.tags);
+    expect(first.quiz_items).not.toBe(second.quiz_items);
+
+    first.tags.push('已修改');
+    first.quiz_items[0]!.question = '已修改';
+
+    expect(second).toEqual(normalizedCard);
   });
 });

@@ -358,3 +358,32 @@
 - `docs/本地运行与数据管理.md`：在 DeepSeek 外发字段中补充录入模式 `entry_mode`。
 - `progress.md`：仅在文件末尾追加本轮规格修正、验证证据、改动文件清单和回滚方式。
 - 回滚方式：在本任务提交仍为当前 `HEAD` 时执行 `git revert --no-edit HEAD`。
+
+## 2026-07-17 - Task: 修正 AI 响应资源与错误边界
+
+### What was done
+
+- 区分响应正文读取阶段的超时、非法 JSON 和传输断流，只有非法 JSON 沿用一次重试，超时与断流直接返回脱敏错误。
+- 非 2xx HTTP 响应在返回统一错误前尝试释放响应体，释放失败不会覆盖或泄露原有错误信息。
+- 确定性 AI 提供者每次返回独立深拷贝，避免一次测试或调用修改结果后污染后续调用。
+- 补充正文错误、响应体释放、脱敏和引用隔离测试，并同步本地运行说明。
+
+### Testing
+
+- TDD 红灯：先只补测试并运行 `npx vitest run tests/server/deepseek.test.ts`，十六条测试中五条按预期失败；正文超时和断流各请求两次、两个 HTTP 响应体取消回调均未调用、确定性 AI 两次返回同一对象引用。
+- 外层非法 JSON 回归用例在旧实现上直接通过，证明既有 `invalid_json` 一次重试边界正确；本轮未伪造该项红灯。
+- TDD 绿灯：最小实现正文错误分类、HTTP 响应体释放和结果深拷贝后，`npx vitest run tests/server/deepseek.test.ts` 十六条测试全部通过。
+- `npx vitest run tests/server/ai-schema.test.ts tests/server/deepseek.test.ts`：通过，两份测试文件共三十八条测试全部通过，未发送真实网络请求。
+- `npm test`：通过，五个测试文件共六十条测试全部通过。
+- `npm run typecheck`：通过，前端与服务端 TypeScript 配置均无类型错误。
+- `npm run build`：通过，成功生成前端与服务端构建产物。
+- `git diff --check`：通过；改动范围仅包含本轮五个允许文件，仓库与构建产物未发现真实密钥模式。
+
+### Notes
+
+- `server/ai/deepseek.ts`：细分正文读取错误并在 HTTP 失败时释放响应体，所有失败继续使用受限错误码且不保存原始 cause。
+- `tests/helpers/fakeAiProvider.ts`：每次规范化调用返回预设结果的深拷贝。
+- `tests/server/deepseek.test.ts`：新增统一 mock 恢复、正文阶段错误、响应体取消失败脱敏和引用隔离覆盖。
+- `docs/本地运行与数据管理.md`：补充正文超时与断流不重试、HTTP 失败释放响应体的说明。
+- `progress.md`：仅在文件末尾追加本轮修正、验证证据、改动文件清单和回滚方式。
+- 回滚方式：在本任务提交仍为当前 `HEAD` 时执行 `git revert --no-edit HEAD`。
