@@ -213,3 +213,35 @@
 - `docs/本地运行与数据管理.md`：补充开发代理的大小写、查询参数和相似前缀边界说明。
 - `progress.md`：仅在文件末尾追加本轮修正、验证证据、改动文件清单和回滚方式。
 - 回滚方式：在本任务提交仍为当前 `HEAD` 时执行 `git revert --no-edit HEAD`。
+
+## 2026-07-16 - Task: 建立 SQLite 结构和公考分类目录
+
+### What was done
+
+- 建立首版 SQLite 十张业务与迁移表、五个查询索引及字段、检查、外键和级联约束。
+- 建立十个一级板块、五十九个二级考点的确定性分类目录，并通过版本迁移幂等写入共六十九条分类。
+- 建立启用 WAL 与外键约束的数据库管理器，支持关闭、替换数据库后重新迁移并继续访问。
+- 将服务启动接入数据目录创建、数据库打开和迁移流程，并补充本地数据库管理说明。
+
+### Testing
+
+- TDD 红灯：先只创建数据库测试并运行 `npx vitest run tests/server/database.test.ts`，按预期因 `../helpers/testDatabase` 模块不存在而在收集阶段失败。
+- TDD 绿灯：实现最小数据库能力后运行 `npx vitest run tests/server/database.test.ts`，六条测试全部通过，覆盖十张表、五个索引、10/59/69 分类计数、确定性编号、重复迁移、WAL、外键、关键检查约束、级联删除和数据库替换。
+- `npx vitest run tests/server/health.test.ts tests/frontend/app.test.tsx`：通过，任务 1 的两个测试文件共十二条测试全部通过。
+- `npm run typecheck`：通过，前端与服务端 TypeScript 配置均无类型错误。
+- `npm run build`：通过，成功生成前端与服务端构建产物。
+- 构建服务运行检查：从项目根启动 `dist-server/index.js`，健康检查返回 `ok`，隔离临时数据目录成功生成 `gongkao.db`，随后已停止进程并清理该目录。
+- `git diff --check`：通过，未发现空白错误；范围、密钥和运行产物检查无异常。
+
+### Notes
+
+- `server/db/database.ts`：新增数据库目录创建、WAL 与外键初始化以及关闭、获取和替换连接能力。
+- `server/db/migrations.ts`：新增首版事务迁移、版本记录和确定性分类幂等写入。
+- `server/db/migrations/001_initial.sql`：新增十张表、字段约束、外键级联和五个索引。
+- `server/catalog/categories.ts`：新增十组、共五十九个二级考点的不可变公考分类目录。
+- `tests/helpers/testDatabase.ts`：新增独占系统临时目录的数据库测试辅助器，并仅清理自身目录。
+- `tests/server/database.test.ts`：新增数据库结构、分类、迁移、连接约束、级联删除和替换行为测试。
+- `server/index.ts`：在本机监听前创建数据目录、打开数据库并执行迁移。
+- `docs/本地运行与数据管理.md`：补充数据库路径、首次迁移、WAL、外键和删除数据目录的影响。
+- `progress.md`：仅在文件末尾追加本轮实现、验证证据、改动文件清单和回滚方式。
+- 回滚方式：在本任务提交仍为当前 `HEAD` 时执行 `git revert --no-edit HEAD`。
