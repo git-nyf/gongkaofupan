@@ -359,7 +359,7 @@ describe('混合卡组与题面复习', () => {
       quizItems: [{ id: 'target-quiz' }],
     });
     const validBody = {
-      categoryIds: [' 常识判断/法律 ', '常识判断/法律'],
+      categoryIds: [' ', ' 常识判断/法律 ', '常识判断/法律'],
       cardIds: [],
       tagIds: [],
       count: 1,
@@ -375,9 +375,21 @@ describe('混合卡组与题面复习', () => {
       'target-quiz',
     ]);
 
+    const allBlank = await request(app)
+      .post('/api/study/sessions')
+      .send({
+        ...validBody,
+        categoryIds: [' ', '  '],
+        cardIds: [' '],
+        tagIds: ['   '],
+      });
+    expect(allBlank.status).toBe(200);
+    expect(allBlank.body.items.map((item: { quizItemId: string }) => item.quizItemId)).toEqual([
+      'target-quiz',
+    ]);
+
     const invalidBodies = [
       {},
-      { ...validBody, categoryIds: [' '] },
       { ...validBody, count: 0 },
       { ...validBody, count: 101 },
       { ...validBody, count: 1.5 },

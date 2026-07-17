@@ -4,8 +4,8 @@ import type { StudySessionInput } from '../../shared/contracts';
 import { StudyServiceError, type StudyService } from './service';
 
 const identifierArraySchema = z
-  .array(z.string().transform((value) => value.trim()).refine(Boolean))
-  .transform((values) => [...new Set(values)]);
+  .array(z.string())
+  .transform((values) => [...new Set(values.map((value) => value.trim()).filter(Boolean))]);
 
 const dateSchema = (endOfDay: boolean) =>
   z.string().transform((value, context) => {

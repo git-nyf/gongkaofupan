@@ -560,3 +560,28 @@
 - `docs/本地运行与数据管理.md`：补充会话与复习接口、选择语义、事务原子性和 `learning_steps` 兼容策略。
 - `progress.md`：仅在文件末尾追加本轮实现、验证证据、改动文件清单和回滚方式。
 - 回滚方式：在本任务提交仍为当前 `HEAD` 时执行 `git revert --no-edit HEAD`。
+
+## 2026-07-17 - Task: 修正会话筛选编号归一化
+
+### What was done
+
+- 会话筛选编号数组改为先验证元素类型，再统一去除首尾空白、忽略空白编号并去重；归一化后允许为空，继续表示不限制该类筛选。
+- 保持严格请求体和元素类型校验不变，非字符串、嵌套值及额外字段仍会被拒绝。
+
+### Testing
+
+- TDD 红灯：先为混合空白项和三类数组全空白补充请求断言，运行 `npx vitest run tests/server/study-session.test.ts`，十五项中一项按预期失败；含空白项的有效分类数组返回 400，而预期为 200，其余十四项通过。
+- TDD 绿灯：最小调整编号数组归一化顺序后，再次运行同一命令，单个测试文件十五项全部通过；混合空白和全空白数组均命中合格题面。
+- `npm test`：通过，十个测试文件共一百五十四项全部通过，未访问真实网络。
+- `npm run typecheck`：通过，前端与服务端 TypeScript 配置均无类型错误。
+- `npm run build`：通过，成功生成前端与服务端构建产物。
+- `git diff --check`：通过，未发现空白格式错误；仅输出既有 Windows 工作区的 LF/CRLF 转换提示。
+- 使用 PowerShell `Select-String` 扫描 `server`、`tests`、`docs` 和 `progress.md` 中的 `sk-[A-Za-z0-9]{20,}` 模式，结果为零条匹配。
+
+### Notes
+
+- `server/study/routes.ts`：将筛选编号数组改为整体 trim、去空和去重，同时保留字符串元素校验。
+- `tests/server/study-session.test.ts`：新增混合空白项和全空白数组均可生成会话的回归断言。
+- `docs/本地运行与数据管理.md`：明确空白编号会被忽略，归一化后空数组仍有效。
+- `progress.md`：仅在文件末尾追加本轮修正、验证证据、改动文件清单和回滚方式。
+- 回滚方式：在本任务提交仍为当前 `HEAD` 时执行 `git revert --no-edit HEAD`。
