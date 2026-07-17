@@ -27,7 +27,7 @@ const upload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: maxFileSize },
   fileFilter(_request, file, callback) {
-    if (file.mimetype in extensionByMime) callback(null, true);
+    if (isAllowedImageMime(file.mimetype)) callback(null, true);
     else callback(new InvalidImageTypeError());
   },
 });
@@ -192,10 +192,16 @@ function uploadedFiles(request: express.Request): Express.Multer.File[] | undefi
 function areValidImages(files: Express.Multer.File[]) {
   return files.every(
     (file) =>
-      file.mimetype in extensionByMime &&
+      isAllowedImageMime(file.mimetype) &&
       file.size <= maxFileSize &&
       Buffer.isBuffer(file.buffer),
   );
+}
+
+export function isAllowedImageMime(
+  mimeType: string,
+): mimeType is keyof typeof extensionByMime {
+  return Object.hasOwn(extensionByMime, mimeType);
 }
 
 function prepareFiles(files: Express.Multer.File[], directory: string): PreparedFile[] | undefined {

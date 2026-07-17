@@ -495,3 +495,32 @@
 - `docs/本地运行与数据管理.md`：补充卡片管理 API、筛选默认值、日期分页、图片限制和文件事务顺序。
 - `progress.md`：仅在文件末尾追加本轮实现、验证证据、改动文件清单和回滚方式。
 - 回滚方式：在本任务提交仍为当前 `HEAD` 时执行 `git revert --no-edit HEAD`。
+
+## 2026-07-17 - Task: 修正卡片编辑竞态与上传边界
+
+### What was done
+
+- 卡片处于 `processing` 时，包含原文、AI 固定字段、分类、模板或掌握度等 AI 相关内容的补丁会在任何校验和写入前整体拒绝，返回独立的 `processing_conflict`；用户标签、来源信息、星级和归档状态仍可安全更新。
+- 批量添加标签在去空和去重后必须至少保留一项，空数组和全空白标签均返回参数错误且不更新卡片时间。
+- 图片 MIME 白名单统一通过 `Object.hasOwn` 谓词判断，Multer 文件过滤与完整接收后的二次验证复用同一策略，不再接受原型链属性名。
+
+### Testing
+
+- TDD 红灯：先运行 `npx vitest run tests/server/cards-query.test.ts tests/server/uploads.test.ts`，三十六项中三项按预期失败；整理中的混合敏感补丁错误返回 200，空批量标签错误返回 200，MIME 策略导出缺失并报 `isAllowedImageMime is not a function`。
+- 首次最小实现后三十六项中三十五项通过；唯一失败来自新测试错误假设标签顺序，实际标签集合和来源正确。改为集合断言后专项三十六项全部通过。
+- `npm test`：通过，八个测试文件共一百二十六项全部通过，测试未调用真实网络。
+- `npm run typecheck`：通过，前端与服务端 TypeScript 配置均无类型错误。
+- `npm run build`：通过，成功生成前端与服务端构建产物。
+- `git diff --check`：通过，未发现空白格式错误；授权范围和密钥模式扫描未发现范围外文件或真实密钥。
+
+### Notes
+
+- `server/cards/repository.ts`：新增整理中 AI 相关字段冲突的事务前置校验和专用错误码。
+- `server/cards/service.ts`：将 `processing_conflict` 纳入服务层稳定错误类型。
+- `server/cards/routes.ts`：新增整理中编辑冲突的 409 响应，并拒绝归一化后为空的批量标签。
+- `server/uploads/routes.ts`：新增并复用基于自有属性的图片 MIME 白名单谓词。
+- `tests/server/cards-query.test.ts`：新增 deferred AI 竞态、安全元数据、原子冲突和空批量标签回归测试。
+- `tests/server/uploads.test.ts`：新增 MIME 白名单与原型属性名的直接策略测试，并移除无效的伪 MIME HTTP 覆盖。
+- `docs/本地运行与数据管理.md`：补充整理中 AI 相关内容与安全元数据的编辑边界。
+- `progress.md`：仅在文件末尾追加本轮修正、验证证据、改动文件清单和回滚方式。
+- 回滚方式：在本任务提交仍为当前 `HEAD` 时执行 `git revert --no-edit HEAD`。

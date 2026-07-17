@@ -12,7 +12,11 @@ import type {
   NormalizedCard,
 } from '../../shared/contracts';
 
-export type CardRepositoryErrorCode = 'invalid_categories' | 'invalid_state' | 'not_found';
+export type CardRepositoryErrorCode =
+  | 'invalid_categories'
+  | 'invalid_state'
+  | 'not_found'
+  | 'processing_conflict';
 
 export class CardRepositoryError extends Error {
   constructor(readonly code: CardRepositoryErrorCode) {
@@ -416,6 +420,9 @@ export class CardRepository {
         .prepare('SELECT raw_input, ai_status FROM cards WHERE id = ?')
         .get(cardId) as { raw_input: string; ai_status: CardDetail['aiStatus'] } | undefined;
       if (!current) throw new CardRepositoryError('not_found');
+      if (current.ai_status === 'processing' && hasAiRelatedUpdate(input)) {
+        throw new CardRepositoryError('processing_conflict');
+      }
       if (input.categoryIds !== undefined) this.assertCategories(database, input.categoryIds);
 
       const assignments: string[] = [];
@@ -693,4 +700,21 @@ export class CardRepository {
 
 function normalizeNames(names: string[]) {
   return [...new Set(names.map((name) => name.trim()).filter(Boolean))];
+}
+
+function hasAiRelatedUpdate(input: CardUpdateInput) {
+  const fields: Array<keyof CardUpdateInput> = [
+    'rawInput',
+    'rawContentJson',
+    'normalizedStatement',
+    'wrongPoint',
+    'analysis',
+    'mnemonic',
+    'extension',
+    'notes',
+    'categoryIds',
+    'template',
+    'mastery',
+  ];
+  return fields.some((field) => input[field] !== undefined);
 }

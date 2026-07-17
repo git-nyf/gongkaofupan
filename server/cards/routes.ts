@@ -69,7 +69,11 @@ const bulkUpdateSchema = z
   .object({
     ids: z.array(z.string().min(1)).min(1).transform((ids) => [...new Set(ids)]),
     rating: ratingSchema.optional(),
-    tags: z.array(z.string()).transform(normalizeNames).optional(),
+    tags: z
+      .array(z.string())
+      .transform(normalizeNames)
+      .refine((tags) => tags.length > 0)
+      .optional(),
     archived: z.boolean().optional(),
   })
   .strict()
@@ -296,6 +300,13 @@ function sendSafeError(response: express.Response, error: unknown) {
     }
     if (error.code === 'invalid_state') {
       response.status(409).json({ code: 'invalid_state', message: '当前卡片状态不可重新整理' });
+      return;
+    }
+    if (error.code === 'processing_conflict') {
+      response.status(409).json({
+        code: 'processing_conflict',
+        message: '卡片正在整理，请稍后再编辑相关内容',
+      });
       return;
     }
     sendInvalidRequest(response);

@@ -442,6 +442,85 @@ describe('卡片查询、管理与批量操作', () => {
     ]);
   });
 
+  it('整理进行中只允许安全元数据更新，并原子拒绝包含 AI 相关字段的补丁', async () => {
+    let reportStarted!: (input: NormalizeCardInput) => void;
+    let completeAi!: (result: NormalizedCard) => void;
+    const started = new Promise<NormalizeCardInput>((resolve) => {
+      reportStarted = resolve;
+    });
+    const completion = new Promise<NormalizedCard>((resolve) => {
+      completeAi = resolve;
+    });
+    const { app, database } = setup(async (input) => {
+      reportStarted(structuredClone(input));
+      return completion;
+    });
+    insertCard(database, {
+      id: 'processing-card',
+      rawInput: '旧原文',
+      aiStatus: 'pending',
+      mastery: 'unseen',
+    });
+
+    const retry = request(app)
+      .post('/api/cards/processing-card/retry-ai')
+      .send({})
+      .then((response) => response);
+    const normalizeInput = await started;
+    expect(normalizeInput.raw_input).toBe('旧原文');
+
+    const safePatch = await request(app)
+      .patch('/api/cards/processing-card')
+      .send({ rating: 4, userTags: ['安全标签'], archived: true });
+    const mixedConflict = await request(app)
+      .patch('/api/cards/processing-card')
+      .send({ rawInput: '新原文', rating: 5 });
+    const masteryConflict = await request(app)
+      .patch('/api/cards/processing-card')
+      .send({ mastery: 'hard' });
+
+    expect(safePatch.status).toBe(200);
+    expect(mixedConflict.status).toBe(409);
+    expect(mixedConflict.body).toEqual({
+      code: 'processing_conflict',
+      message: '卡片正在整理，请稍后再编辑相关内容',
+    });
+    expect(masteryConflict.status).toBe(409);
+    expect(
+      database.db
+        .prepare('SELECT raw_input, rating, mastery, archived FROM cards WHERE id = ?')
+        .get('processing-card'),
+    ).toEqual({ raw_input: '旧原文', rating: 4, mastery: 'unseen', archived: 1 });
+
+    completeAi(
+      normalized({
+        normalized_statement: '旧原文规范表述',
+        quiz_items: [{ direction: 'single', question: '旧原文题目', answer: '旧原文答案' }],
+      }),
+    );
+    const retried = await retry;
+
+    expect(retried.status).toBe(200);
+    expect(retried.body).toMatchObject({
+      rawInput: '旧原文',
+      normalizedStatement: '旧原文规范表述',
+      rating: 4,
+      mastery: 'unseen',
+      archived: true,
+      aiStatus: 'ready',
+    });
+    expect(retried.body.tags).toHaveLength(2);
+    expect(retried.body.tags).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ name: '安全标签', origin: 'user' }),
+        expect.objectContaining({ name: 'AI标签', origin: 'ai' }),
+      ]),
+    );
+    expect(retried.body.quizItems).toEqual([
+      expect.objectContaining({ question: '旧原文题目', answer: '旧原文答案' }),
+    ]);
+  });
+
   it('批量加星、加标签和归档时去重编号、忽略缺失卡片并返回实际命中数', async () => {
     const { app, database } = setup();
     insertCard(database, {
@@ -510,6 +589,27 @@ describe('卡片查询、管理与批量操作', () => {
     const { app } = setup();
     const response = await request(app).patch('/api/cards/bulk').send(body);
     expect(response.status).toBe(400);
+  });
+
+  it('拒绝空数组和归一化后为空的批量标签且不修改更新时间', async () => {
+    const { app, database } = setup();
+    insertCard(database, { id: 'empty-tags' });
+    const before = database.db
+      .prepare('SELECT updated_at FROM cards WHERE id = ?')
+      .get('empty-tags');
+
+    const empty = await request(app)
+      .patch('/api/cards/bulk')
+      .send({ ids: ['empty-tags'], tags: [] });
+    const blank = await request(app)
+      .patch('/api/cards/bulk')
+      .send({ ids: ['empty-tags'], tags: [' ', '  '] });
+
+    expect(empty.status).toBe(400);
+    expect(blank.status).toBe(400);
+    expect(
+      database.db.prepare('SELECT updated_at FROM cards WHERE id = ?').get('empty-tags'),
+    ).toEqual(before);
   });
 
   it('删除卡片提交后删除图片，并级联清理全部卡片关联记录', async () => {

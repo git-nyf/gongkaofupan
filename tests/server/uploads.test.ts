@@ -4,6 +4,7 @@ import request, { type Response } from 'supertest';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createApp } from '../../server/app';
 import { createCardService, type CardService } from '../../server/cards/service';
+import { isAllowedImageMime } from '../../server/uploads/routes';
 import type { CreateCardInput, NormalizedCard } from '../../shared/contracts';
 import { createTestDatabase } from '../helpers/testDatabase';
 
@@ -87,6 +88,15 @@ describe('本地图片上传与读取', () => {
     return response.body as { id: string; attachments: unknown[] };
   }
 
+  it('图片 MIME 策略只接受三个自有白名单键', () => {
+    expect(isAllowedImageMime('image/png')).toBe(true);
+    expect(isAllowedImageMime('image/jpeg')).toBe(true);
+    expect(isAllowedImageMime('image/webp')).toBe(true);
+    for (const mimeType of ['constructor', 'toString', '__proto__', 'text/plain']) {
+      expect(isAllowedImageMime(mimeType)).toBe(false);
+    }
+  });
+
   it('保留 JSON 创建，并在 multipart 创建时先把多张附件纳入事务 A 再调用 AI', async () => {
     const { app, database, normalize, uploadsDirectory } = setup();
     const jsonCard = await createJsonCard(app);
@@ -167,10 +177,6 @@ describe('本地图片上传与读取', () => {
       .post('/api/cards')
       .field('payload', JSON.stringify(createInput()))
       .attach('file', Buffer.from('plain'), { filename: 'plain.txt', contentType: 'text/plain' });
-    const prototypeMime = await request(app)
-      .post('/api/cards')
-      .field('payload', JSON.stringify(createInput()))
-      .attach('file', Buffer.from('plain'), { filename: 'plain.bin', contentType: 'constructor' });
     const tooLarge = await request(app)
       .post('/api/cards')
       .field('payload', JSON.stringify(createInput()))
@@ -180,7 +186,6 @@ describe('本地图片上传与读取', () => {
       });
 
     expectSafeError(invalidMime, 400);
-    expectSafeError(prototypeMime, 400);
     expectSafeError(tooLarge, 413);
     expect(readdirSync(uploadsDirectory)).toEqual([]);
   });

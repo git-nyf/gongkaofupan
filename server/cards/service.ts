@@ -33,7 +33,11 @@ export interface CardService {
   retryPendingBatch(limit: number): Promise<{ attempted: number; ready: number; stillPending: number }>;
 }
 
-export type CardServiceErrorCode = 'invalid_categories' | 'invalid_state' | 'not_found';
+export type CardServiceErrorCode =
+  | 'invalid_categories'
+  | 'invalid_state'
+  | 'not_found'
+  | 'processing_conflict';
 
 export class CardServiceError extends Error {
   constructor(readonly code: CardServiceErrorCode) {
