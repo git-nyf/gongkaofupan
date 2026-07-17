@@ -1,13 +1,16 @@
-import { useMemo, useRef, useState, type FormEvent } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import { CircleAlert, CircleCheck, FileImage, LoaderCircle, Plus, Save, Trash2, X } from 'lucide-react';
+import { useInRouterContext, useSearchParams } from 'react-router-dom';
 import type { CardDetail, CardUpdateInput, CreateCardInput, EntryMode, Mastery } from '../../shared/contracts';
 import { categoryCatalog } from '../../server/catalog/categories';
 import { api, apiForm } from '../api/client';
 import { entryTemplates } from '../catalog/templates';
 import { RichTextEditor } from '../components/RichTextEditor';
+import { StatusNotice } from '../components/StatusNotice';
 
 type Rating = 1 | 2 | 3 | 4 | 5;
 type SaveState = 'idle' | 'saving' | 'ready' | 'pending' | 'needs_input' | 'error';
+type EditLoadState = 'idle' | 'loading' | 'ready' | 'error';
 
 interface RequiredErrors {
   categories?: string;
@@ -30,6 +33,15 @@ const primaryCategories = Object.entries(categoryCatalog) as Array<
 >;
 
 export function EntryPage() {
+  return useInRouterContext() ? <RoutedEntryPage /> : <EntryForm />;
+}
+
+function RoutedEntryPage() {
+  const [searchParams] = useSearchParams();
+  return <EntryForm editId={searchParams.get('edit')?.trim() || undefined} />;
+}
+
+function EntryForm({ editId }: { editId?: string }) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const saveInFlightRef = useRef(false);
   const [entryMode, setEntryMode] = useState<EntryMode>('mistake');
@@ -54,6 +66,10 @@ export function EntryPage() {
   const [saveState, setSaveState] = useState<SaveState>('idle');
   const [statusMessage, setStatusMessage] = useState('');
   const [requiredErrors, setRequiredErrors] = useState<RequiredErrors>({});
+  const [editLoadState, setEditLoadState] = useState<EditLoadState>(editId ? 'loading' : 'idle');
+  const [editReloadKey, setEditReloadKey] = useState(0);
+  const [loadedDetail, setLoadedDetail] = useState<CardDetail>();
+  const isEditing = Boolean(editId);
 
   const selectedTemplate = useMemo(
     () => entryTemplates.find(({ name }) => name === templateName) ?? entryTemplates[0],
@@ -64,6 +80,68 @@ export function EntryPage() {
     () => [...selectedPrimary, ...selectedSecondary],
     [selectedPrimary, selectedSecondary],
   );
+
+  const applyDetailToForm = useCallback((detail: CardDetail) => {
+    setEntryMode(detail.entryMode);
+    setTemplateName(detail.template);
+    setRawInput(detail.rawInput);
+    setRawContentJson(detail.rawContentJson ?? rawContentForText(detail.rawInput));
+    setWrongPoint(detail.wrongPoint);
+    setAnalysis(detail.analysis);
+    setMnemonic(detail.mnemonic);
+    setExtension(detail.extension);
+    setNotes(detail.notes);
+    setSelectedPrimary(
+      detail.categories.filter(({ parentId }) => parentId === null).map(({ id }) => id),
+    );
+    setSelectedSecondary(
+      detail.categories.filter(({ parentId }) => parentId !== null).map(({ id }) => id),
+    );
+    setSourceType(detail.sourceType);
+    setSourceDetail(detail.sourceDetail);
+    setRating(detail.rating as Rating);
+    setMastery(detail.mastery);
+    setTagText(detail.tags.filter(({ origin }) => origin === 'user').map(({ name }) => name).join('，'));
+    setStagedFiles([]);
+    setPersistedAttachments(
+      detail.attachments.map(({ id, originalName }) => ({ id, originalName })),
+    );
+    setCurrentCardId(detail.id);
+    setRequiredErrors({});
+    if (fileInputRef.current) fileInputRef.current.value = '';
+  }, []);
+
+  useEffect(() => {
+    if (!editId) {
+      setEditLoadState('idle');
+      return;
+    }
+
+    const controller = new AbortController();
+    setEditLoadState('loading');
+    setStatusMessage('');
+    api<CardDetail>(`/api/cards/${encodeURIComponent(editId)}`, { signal: controller.signal })
+      .then((detail) => {
+        applyDetailToForm(detail);
+        setLoadedDetail(detail);
+        setEditLoadState('ready');
+        if (detail.aiStatus === 'pending' || detail.aiStatus === 'processing') {
+          setSaveState('pending');
+          setStatusMessage('当前卡片待整理');
+        } else if (detail.aiStatus === 'needs_input') {
+          setSaveState('needs_input');
+          setStatusMessage('当前卡片待完善');
+        } else {
+          setSaveState('idle');
+        }
+      })
+      .catch((error: unknown) => {
+        if (isAbortError(error)) return;
+        setEditLoadState('error');
+      });
+
+    return () => controller.abort();
+  }, [applyDetailToForm, editId, editReloadKey]);
 
   const clearFormValues = () => {
     setEntryMode('mistake');
@@ -90,6 +168,12 @@ export function EntryPage() {
   };
 
   const resetForm = () => {
+    if (isEditing && loadedDetail) {
+      applyDetailToForm(loadedDetail);
+      setSaveState('idle');
+      setStatusMessage('');
+      return;
+    }
     clearFormValues();
     setSaveState('idle');
     setStatusMessage('');
@@ -188,6 +272,19 @@ export function EntryPage() {
 
   const applySaveResult = (detail: CardDetail) => {
     const resultState = detail.aiStatus === 'processing' ? 'pending' : detail.aiStatus;
+    if (isEditing) {
+      applyDetailToForm(detail);
+      setLoadedDetail(detail);
+      setSaveState(resultState);
+      setStatusMessage(
+        resultState === 'ready'
+          ? '已保存并完成整理'
+          : resultState === 'pending'
+            ? '已保存，等待重新整理'
+            : '已保存，需要补充关系后再整理',
+      );
+      return;
+    }
     if (resultState === 'ready') {
       clearFormValues();
       setSaveState('ready');
@@ -209,16 +306,36 @@ export function EntryPage() {
     );
   };
 
+  if (editId && editLoadState === 'loading') {
+    return (
+      <section className="page entry-page">
+        <header className="page__header"><h1 className="page__title">编辑卡片</h1></header>
+        <StatusNotice state="loading" message="正在加载卡片" />
+      </section>
+    );
+  }
+
+  if (editId && editLoadState === 'error') {
+    return (
+      <section className="page entry-page">
+        <header className="page__header"><h1 className="page__title">编辑卡片</h1></header>
+        <StatusNotice state="error" message="卡片加载失败，请稍后重试" />
+        <button className="button button--secondary entry-page__retry" onClick={() => setEditReloadKey((current) => current + 1)} type="button">重新加载</button>
+      </section>
+    );
+  }
+
   return (
     <section className="page entry-page">
       <form className="entry-form" noValidate onSubmit={submit}>
         <header className="entry-page__topbar">
           <div className="entry-page__title-group">
-            <h1 className="page__title">录入</h1>
+            <h1 className="page__title">{isEditing ? '编辑卡片' : '录入'}</h1>
             <fieldset className="entry-mode" aria-label="录入模式">
               <label>
                 <input
                   checked={entryMode === 'mistake'}
+                  disabled={isEditing}
                   name="entry-mode"
                   onChange={() => setEntryMode('mistake')}
                   type="radio"
@@ -228,6 +345,7 @@ export function EntryPage() {
               <label>
                 <input
                   checked={entryMode === 'knowledge'}
+                  disabled={isEditing}
                   name="entry-mode"
                   onChange={() => setEntryMode('knowledge')}
                   type="radio"
@@ -488,4 +606,20 @@ function localDateValue() {
   const month = String(now.getMonth() + 1).padStart(2, '0');
   const day = String(now.getDate()).padStart(2, '0');
   return `${year}-${month}-${day}`;
+}
+
+function rawContentForText(text: string) {
+  return JSON.stringify({
+    type: 'doc',
+    content: [
+      {
+        type: 'paragraph',
+        content: text ? [{ type: 'text', text }] : undefined,
+      },
+    ],
+  });
+}
+
+function isAbortError(error: unknown) {
+  return error instanceof DOMException && error.name === 'AbortError';
 }
