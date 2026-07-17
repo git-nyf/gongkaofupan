@@ -19,6 +19,14 @@ async function toApiError(response: Response): Promise<ApiError> {
   return new ApiError(response.status, body.code, body.message);
 }
 
+async function readSuccessResponse<T>(response: Response): Promise<T> {
+  if (response.status === 204) {
+    return undefined as T;
+  }
+
+  return response.json() as Promise<T>;
+}
+
 export async function api<T>(path: string, init?: RequestInit): Promise<T> {
   const headers = new Headers(init?.headers);
   if (!headers.has('Content-Type')) {
@@ -30,7 +38,7 @@ export async function api<T>(path: string, init?: RequestInit): Promise<T> {
     throw await toApiError(response);
   }
 
-  return response.json() as Promise<T>;
+  return readSuccessResponse<T>(response);
 }
 
 export async function apiForm<T>(path: string, formData: FormData): Promise<T> {
@@ -39,5 +47,5 @@ export async function apiForm<T>(path: string, formData: FormData): Promise<T> {
     throw await toApiError(response);
   }
 
-  return response.json() as Promise<T>;
+  return readSuccessResponse<T>(response);
 }

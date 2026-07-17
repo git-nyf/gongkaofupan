@@ -62,20 +62,37 @@ describe('桌面工作台', () => {
     const { container } = render(<App />);
 
     const collapseButton = screen.getByRole('button', { name: '折叠侧栏' });
+    const sidebar = container.querySelector('.app-shell__sidebar');
     expect(collapseButton).toHaveAttribute('title', '折叠侧栏');
+    expect(collapseButton).toHaveAttribute('aria-expanded', 'true');
+    expect(collapseButton).toHaveAttribute('aria-controls', 'app-sidebar');
+    expect(sidebar).toHaveAttribute('id', 'app-sidebar');
 
     await user.click(collapseButton);
 
     expect(container.querySelector('.app-shell')).toHaveClass('app-shell--collapsed');
-    expect(screen.getByRole('button', { name: '展开侧栏' })).toHaveAttribute(
-      'title',
-      '展开侧栏',
-    );
+    const expandButton = screen.getByRole('button', { name: '展开侧栏' });
+    expect(expandButton).toHaveAttribute('title', '展开侧栏');
+    expect(expandButton).toHaveAttribute('aria-expanded', 'false');
+    expect(expandButton).toHaveFocus();
     expect(container.querySelector('.app-shell__brand-text')).not.toBeInTheDocument();
     for (const route of routes) {
       const link = screen.getByRole('link', { name: route.label });
       expect(link.querySelector('.app-shell__nav-label')).not.toBeInTheDocument();
     }
+  });
+
+  it('侧栏折叠前后都保留品牌图标', async () => {
+    const user = userEvent.setup();
+    const { container } = render(<App />);
+    const brand = screen.getByRole('link', { name: '公考记忆卡' });
+
+    expect(brand.querySelector('.app-shell__brand-mark svg')).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: '折叠侧栏' }));
+
+    expect(container.querySelector('.app-shell__brand-mark svg')).toBeInTheDocument();
+    expect(container.querySelector('.app-shell__brand-text')).not.toBeInTheDocument();
   });
 });
 
@@ -152,6 +169,23 @@ describe('统一 API 客户端', () => {
     });
     const init = fetchMock.mock.calls[0]?.[1] as RequestInit;
     expect(init.headers).toBeUndefined();
+  });
+
+  it('JSON 与表单请求收到 204 时不解析空响应体', async () => {
+    const jsonResponse = new Response(null, { status: 204 });
+    const formResponse = new Response(null, { status: 204 });
+    const jsonSpy = vi.spyOn(jsonResponse, 'json');
+    const formSpy = vi.spyOn(formResponse, 'json');
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse)
+      .mockResolvedValueOnce(formResponse);
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(api<void>('/api/example')).resolves.toBeUndefined();
+    await expect(apiForm<void>('/api/example', new FormData())).resolves.toBeUndefined();
+    expect(jsonSpy).not.toHaveBeenCalled();
+    expect(formSpy).not.toHaveBeenCalled();
   });
 
   it('用 ApiError 暴露脱敏接口错误', async () => {
