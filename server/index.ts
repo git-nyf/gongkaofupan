@@ -9,6 +9,7 @@ import { readConfig } from './config';
 import { createDatabaseManager } from './db/database';
 import { migrate } from './db/migrations';
 import { createStudyService } from './study/service';
+import { createBackupService } from './backups/service';
 
 const config = readConfig();
 mkdirSync(config.dataDir, { recursive: true });
@@ -27,6 +28,11 @@ const cardService = createCardService({
 cardService.recoverStaleProcessing(new Date());
 const studyService = createStudyService({ database: databaseManager });
 const analyticsService = createAnalyticsService({ database: databaseManager });
+const backupService = createBackupService({
+  database: databaseManager,
+  dataDirectory: config.dataDir,
+  uploadsDirectory,
+});
 const app = createApp({
   cardService,
   studyService,
@@ -36,6 +42,7 @@ const app = createApp({
     deepseekApiKey: config.deepseek.apiKey,
   },
   uploadsDirectory,
+  backupService,
 });
 
 app.listen(config.port, '127.0.0.1', () => {

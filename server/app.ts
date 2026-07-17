@@ -10,6 +10,8 @@ import type { StudyService } from './study/service';
 import { createAnalyticsRouter } from './analytics/routes';
 import type { AnalyticsService } from './analytics/service';
 import { createSettingsRouter, type SettingsRouterDependencies } from './settings/routes';
+import { createBackupRouter } from './backups/routes';
+import type { BackupService } from './backups/service';
 
 interface AppDependencies {
   cardService?: CardService;
@@ -17,6 +19,7 @@ interface AppDependencies {
   analyticsService?: AnalyticsService;
   settings?: SettingsRouterDependencies;
   uploadsDirectory?: string;
+  backupService?: BackupService;
 }
 
 export function createApp({
@@ -25,6 +28,7 @@ export function createApp({
   analyticsService,
   settings,
   uploadsDirectory,
+  backupService,
 }: AppDependencies = {}) {
   const app = express();
 
@@ -51,6 +55,10 @@ export function createApp({
 
   if (settings) {
     app.use(createSettingsRouter(settings));
+  }
+
+  if (backupService) {
+    app.use(createBackupRouter(backupService));
   }
 
   const clientDir = resolve(process.cwd(), 'dist/client');
