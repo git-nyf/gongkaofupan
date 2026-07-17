@@ -230,6 +230,12 @@ describe('卡片库表格和管理操作', () => {
     expect(within(table).queryByRole('button', { name: new RegExp(rawInput) })).not.toBeInTheDocument();
     expect(within(table).queryByRole('link', { name: new RegExp(rawInput) })).not.toBeInTheDocument();
 
+    const confirmMock = vi.mocked(confirm).mockReturnValueOnce(false);
+    await user.click(within(table).getByRole('button', { name: '删除待生成知识点' }));
+    const confirmMessage = String(confirmMock.mock.calls[0]?.[0]);
+    expect(confirmMessage).toContain('待生成知识点');
+    expect(confirmMessage).not.toContain(rawInput);
+
     await user.click(within(table).getByRole('button', { name: '查看待生成知识点详情' }));
     expect(screen.getByRole('dialog', { name: '卡片详情' })).toHaveTextContent(rawInput);
   });

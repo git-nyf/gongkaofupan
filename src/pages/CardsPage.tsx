@@ -141,7 +141,7 @@ export function CardsPage() {
     );
 
   const deleteCard = (card: CardDetail) => {
-    if (!window.confirm(`确认永久删除“${card.normalizedStatement || card.rawInput}”？此操作不可撤销。`)) return;
+    if (!window.confirm(`确认永久删除“${card.normalizedStatement || '待生成知识点'}”？此操作不可撤销。`)) return;
     void runAction(`delete:${card.id}`, () =>
       api<void>(`/api/cards/${card.id}`, { method: 'DELETE' }),
     );

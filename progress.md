@@ -1003,3 +1003,25 @@
 - `tests/frontend/cards-page.test.tsx`：新增编辑转新建请求语义和待整理原文隔离回归测试，并补齐编辑器测试所需的 jsdom 几何桩。
 - `progress.md`：仅在文件末尾追加本轮审查修复、验证证据、改动文件清单和回滚方式。
 - 回滚方式：在本修复提交仍为当前 `HEAD` 时执行 `git revert --no-edit HEAD`。
+
+## 2026-07-17 - Task: 修复删除确认文案的原文泄露
+
+### What was done
+
+- 卡片规范知识为空时，永久删除确认文案使用“待生成知识点”，不再回退显示原始输入；有规范知识的卡片继续显示规范知识，删除确认与删除请求流程不变。
+
+### Testing
+
+- TDD 红灯：运行 `npx vitest run tests/frontend/cards-page.test.tsx -t "规范知识为空时表格和操作名称使用中性占位"`，一项失败、八项跳过；确认框实际收到“确认永久删除‘只允许详情查看的唯一原文’”，未包含“待生成知识点”。
+- 定向测试：`npx vitest run tests/frontend/cards-page.test.tsx` 通过，一个测试文件共九项全部通过；确认文案包含“待生成知识点”且不含唯一原文，取消确认时不发送删除请求，详情抽屉仍显示原文。
+- `npm test`：通过，十六个测试文件共二百五十二项全部通过。
+- `npm run typecheck`：通过，前端与服务端 TypeScript 配置均无类型错误。
+- `npm run build`：通过，前端和服务端构建成功；Vite 仍提示前端单块超过 500 KB，本轮未扩大到代码分包。
+- `git diff --check`：通过，仅输出既有 Windows 工作区的 LF/CRLF 转换提示。
+
+### Notes
+
+- `src/pages/CardsPage.tsx`：删除确认在规范知识为空时改用中性占位。
+- `tests/frontend/cards-page.test.tsx`：补充删除确认文案不得包含唯一原文的回归断言。
+- `progress.md`：仅在文件末尾追加本轮删除确认边界修复、验证证据、改动文件清单和回滚方式。
+- 回滚方式：在本修复提交仍为当前 `HEAD` 时执行 `git revert --no-edit HEAD`。
