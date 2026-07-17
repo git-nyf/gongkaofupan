@@ -101,6 +101,52 @@ export interface CardDetail {
   }>;
 }
 
+export interface CardSearchInput {
+  query: string;
+  categoryIds: string[];
+  tagIds: string[];
+  rating?: 1 | 2 | 3 | 4 | 5;
+  mastery?: Mastery;
+  aiStatus?: AiStatus;
+  archived: boolean;
+  createdFrom?: string;
+  createdTo?: string;
+  page: number;
+  pageSize: number;
+}
+
+export interface CardSearchResult {
+  items: CardDetail[];
+  total: number;
+  page: number;
+  pageSize: number;
+}
+
+export interface CardUpdateInput {
+  rawInput?: string;
+  rawContentJson?: string | null;
+  normalizedStatement?: string;
+  wrongPoint?: string;
+  analysis?: string;
+  mnemonic?: string;
+  extension?: string;
+  notes?: string;
+  categoryIds?: string[];
+  userTags?: string[];
+  template?: string;
+  sourceType?: string;
+  sourceDetail?: string;
+  rating?: 1 | 2 | 3 | 4 | 5;
+  mastery?: Mastery;
+  archived?: boolean;
+}
+
+export interface BulkCardUpdateInput {
+  rating?: 1 | 2 | 3 | 4 | 5;
+  tags?: string[];
+  archived?: boolean;
+}
+
 export interface QuizItemSchedulingState {
   dueAt: string;
   stability: number;

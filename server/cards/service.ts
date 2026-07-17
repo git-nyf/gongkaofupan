@@ -1,5 +1,12 @@
+import { unlink } from 'node:fs/promises';
+import { resolve, sep } from 'node:path';
 import type {
+  AttachmentInput,
+  BulkCardUpdateInput,
   CardDetail,
+  CardSearchInput,
+  CardSearchResult,
+  CardUpdateInput,
   CreateCardInput,
   NormalizeCardInput,
   NormalizedCard,
@@ -14,6 +21,13 @@ import {
 
 export interface CardService {
   create(input: CreateCardInput): Promise<CardDetail>;
+  search(input: CardSearchInput): CardSearchResult;
+  get(cardId: string): CardDetail;
+  update(cardId: string, input: CardUpdateInput): Promise<CardDetail>;
+  bulkUpdate(ids: string[], input: BulkCardUpdateInput): number;
+  delete(cardId: string): Promise<void>;
+  addAttachments(cardId: string, attachments: AttachmentInput[]): CardDetail;
+  deleteAttachment(cardId: string, attachmentId: string): Promise<void>;
   retryAi(cardId: string): Promise<CardDetail>;
   recoverStaleProcessing(now: Date): number;
   retryPendingBatch(limit: number): Promise<{ attempted: number; ready: number; stillPending: number }>;
@@ -32,14 +46,17 @@ interface CardServiceDependencies {
   database: DatabaseProvider;
   aiProvider: AiProvider;
   now?: () => Date;
+  uploadsDirectory?: string;
 }
 
 export function createCardService({
   database,
   aiProvider,
   now = () => new Date(),
+  uploadsDirectory,
 }: CardServiceDependencies): CardService {
   const repository = new CardRepository(database);
+  const resolvedUploadsDirectory = uploadsDirectory ? resolve(uploadsDirectory) : undefined;
 
   async function normalizeAndComplete(
     cardId: string,
@@ -79,6 +96,28 @@ export function createCardService({
     return normalizeAndComplete(cardId, work);
   };
 
+  const removeStoredFiles = async (storedNames: string[]) => {
+    if (!resolvedUploadsDirectory) return;
+    let failed = false;
+    for (const storedName of storedNames) {
+      if (!isSystemStoredName(storedName)) {
+        failed = true;
+        continue;
+      }
+      const filePath = resolve(resolvedUploadsDirectory, storedName);
+      if (!filePath.startsWith(`${resolvedUploadsDirectory}${sep}`)) {
+        failed = true;
+        continue;
+      }
+      try {
+        await unlink(filePath);
+      } catch (error) {
+        if (!isMissingFileError(error)) failed = true;
+      }
+    }
+    if (failed) throw new Error('附件文件删除失败');
+  };
+
   return {
     async create(createInput) {
       const prepared = prepareCreateInput(createInput);
@@ -93,6 +132,81 @@ export function createCardService({
         normalizeInput: toNormalizeInput(prepared),
         mastery: prepared.initialMastery,
       });
+    },
+
+    search(input) {
+      const { ids, total } = repository.search(input);
+      return {
+        items: ids.map((id) => repository.getDetail(id)),
+        total,
+        page: input.page,
+        pageSize: input.pageSize,
+      };
+    },
+
+    get(cardId) {
+      try {
+        return repository.getDetail(cardId);
+      } catch (error) {
+        throw mapRepositoryError(error);
+      }
+    },
+
+    async update(cardId, updateInput) {
+      const prepared = prepareUpdateInput(updateInput);
+      try {
+        const result = repository.updateInTransaction(cardId, prepared, now().toISOString());
+        if (result.shouldRetryAi) return retryAi(cardId);
+        return repository.getDetail(cardId);
+      } catch (error) {
+        throw mapRepositoryError(error);
+      }
+    },
+
+    bulkUpdate(ids, updateInput) {
+      const uniqueIds = [...new Set(ids)];
+      const prepared: BulkCardUpdateInput = {
+        ...updateInput,
+        tags: updateInput.tags === undefined ? undefined : normalizeNames(updateInput.tags),
+      };
+      try {
+        return repository.bulkUpdateInTransaction(uniqueIds, prepared, now().toISOString());
+      } catch (error) {
+        throw mapRepositoryError(error);
+      }
+    },
+
+    async delete(cardId) {
+      let storedNames: string[];
+      try {
+        storedNames = repository.deleteInTransaction(cardId);
+      } catch (error) {
+        throw mapRepositoryError(error);
+      }
+      await removeStoredFiles(storedNames);
+    },
+
+    addAttachments(cardId, attachments) {
+      try {
+        repository.addAttachmentsInTransaction(
+          cardId,
+          attachments.map((attachment) => ({ ...attachment })),
+          now().toISOString(),
+        );
+        return repository.getDetail(cardId);
+      } catch (error) {
+        throw mapRepositoryError(error);
+      }
+    },
+
+    async deleteAttachment(cardId, attachmentId) {
+      let storedName: string;
+      try {
+        storedName = repository.deleteAttachmentInTransaction(cardId, attachmentId);
+      } catch (error) {
+        throw mapRepositoryError(error);
+      }
+      await removeStoredFiles([storedName]);
     },
 
     retryAi,
@@ -128,6 +242,15 @@ function prepareCreateInput(input: CreateCardInput): CreateCardInput {
     categoryIds: [...new Set(input.categoryIds)],
     userTags: [...new Set(input.userTags.map((tag) => tag.trim()).filter(Boolean))],
     attachments: input.attachments.map((attachment) => ({ ...attachment })),
+  };
+}
+
+function prepareUpdateInput(input: CardUpdateInput): CardUpdateInput {
+  return {
+    ...input,
+    rawInput: input.rawInput?.trim(),
+    categoryIds: input.categoryIds === undefined ? undefined : [...new Set(input.categoryIds)],
+    userTags: input.userTags === undefined ? undefined : normalizeNames(input.userTags),
   };
 }
 
@@ -169,4 +292,22 @@ function toSafeAiErrorCode(error: unknown) {
   ].includes(code)
     ? code
     : 'ai_error';
+}
+
+function normalizeNames(names: string[]) {
+  return [...new Set(names.map((name) => name.trim()).filter(Boolean))];
+}
+
+function isSystemStoredName(storedName: string) {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\.(?:png|jpg|webp)$/i.test(
+    storedName,
+  );
+}
+
+function isMissingFileError(error: unknown) {
+  return (
+    typeof error === 'object' &&
+    error !== null &&
+    Reflect.get(error, 'code') === 'ENOENT'
+  );
 }

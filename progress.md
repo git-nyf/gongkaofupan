@@ -459,3 +459,39 @@
 - `docs/本地运行与数据管理.md`：补充无密钥时本地保存、不触网、不启动批量重试及配置后重试说明。
 - `progress.md`：仅在文件末尾追加本轮修正、验证证据、改动文件清单和回滚方式。
 - 回滚方式：在本任务提交仍为当前 `HEAD` 时执行 `git revert --no-edit HEAD`。
+
+## 2026-07-17 - Task: 完成卡片管理和本地图片
+
+### What was done
+
+- 完成卡片详情读取、组合搜索、稳定分页、普通编辑、批量加星/加标签/归档和级联删除；默认列表排除归档卡片，分类与标签按精确关系筛选，文本搜索覆盖原文、规范表述、解析、口诀、拓展、笔记和标签名。
+- 所有筛选值使用 Zod 校验和 SQLite 参数绑定；分类替换、用户标签替换、批量操作及附件元数据均使用真实事务，同名 AI 标签在用户明确添加后升级为用户来源。
+- `needs_input` 卡片仅在原文实际变化后自动重新整理；星级、标签和归档等元数据修改不会触发 AI，批量和图片测试均使用确定性 AI stub，未访问真实网络。
+- 完成 JSON 与 multipart 两种卡片创建、已有卡片附件增删和本地图片读取；图片仅接受 PNG、JPEG、WebP且单张不超过 10MB，使用 UUID 固定扩展名保存到 `data/uploads`。
+- 创建或添加附件失败时清理本轮文件；删除附件或卡片时先提交数据库删除和外键级联，再删除本地文件，并对不存在文件保持幂等。
+
+### Testing
+
+- TDD 首次红灯：先新增两份测试并运行 `npx vitest run tests/server/cards-query.test.ts tests/server/uploads.test.ts`，共三十三项中一项既有 JSON 创建通过、三十二项按预期失败；管理接口因查询、详情、编辑、批量和删除路由不存在返回 404，multipart 创建落入 JSON 校验返回 400，附件及下载路由不存在返回 404，大文件在缺少 multipart 消费器时连接提前关闭。
+- 首次实现后卡片管理专项二十四项中二十三项通过；唯一失败来自测试错误假设中文标签顺序，实际标签集合与来源正确。改为集合断言后卡片管理专项二十四项全部通过，上传专项首次实现即九项全部通过。
+- 首次 `npm run typecheck` 发现三个类型错误：UUID 模板字面量导致过滤谓词不兼容两项，测试 spy 被断言为普通函数一项；按根因分别最小修正后类型检查通过。
+- `npx vitest run tests/server/cards-query.test.ts tests/server/uploads.test.ts`：通过，两份专项共三十三项全部通过。
+- `npm test`：通过，八个测试文件共一百二十三项全部通过，测试未调用真实网络。
+- `npm run typecheck`：通过，前端与服务端 TypeScript 配置均无类型错误。
+- `npm run build`：通过，成功生成前端与服务端构建产物。
+- `git diff --check`：通过，未发现空白格式错误；PowerShell 授权范围和密钥模式核对未发现范围外文件或 `sk-[A-Za-z0-9]{20,}` 形式的真实密钥。
+
+### Notes
+
+- `shared/contracts.ts`：新增卡片搜索结果、普通更新和批量更新的共享类型。
+- `server/cards/repository.ts`：新增参数化组合查询以及更新、批量、附件和删除事务，并实现用户标签来源升级。
+- `server/cards/service.ts`：新增卡片管理编排、输入去重和数据库提交后的安全文件删除。
+- `server/cards/routes.ts`：新增严格查询、详情、编辑、批量和删除接口，确保静态批量路由优先注册。
+- `server/uploads/routes.ts`：新增 Multer 内存上传、格式与大小限制、UUID 落盘、失败清理及安全文件读取。
+- `server/app.ts`：在提供上传目录时挂载上传接口，并保持未提供目录时的既有应用兼容。
+- `server/index.ts`：创建并向卡片服务和应用传入同一个 `data/uploads` 目录。
+- `tests/server/cards-query.test.ts`：使用真实临时 SQLite、真实服务和 Express 覆盖搜索、筛选、更新、批量、级联与 AI 重试边界。
+- `tests/server/uploads.test.ts`：使用真实临时目录覆盖 multipart 创建、三种图片、限制、清理、读取和删除。
+- `docs/本地运行与数据管理.md`：补充卡片管理 API、筛选默认值、日期分页、图片限制和文件事务顺序。
+- `progress.md`：仅在文件末尾追加本轮实现、验证证据、改动文件清单和回滚方式。
+- 回滚方式：在本任务提交仍为当前 `HEAD` 时执行 `git revert --no-edit HEAD`。

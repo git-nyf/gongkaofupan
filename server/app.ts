@@ -4,12 +4,14 @@ import { existsSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { createCardRouter } from './cards/routes';
 import type { CardService } from './cards/service';
+import { createUploadRouter } from './uploads/routes';
 
 interface AppDependencies {
   cardService?: CardService;
+  uploadsDirectory?: string;
 }
 
-export function createApp({ cardService }: AppDependencies = {}) {
+export function createApp({ cardService, uploadsDirectory }: AppDependencies = {}) {
   const app = express();
 
   app.use(express.json({ limit: '2mb' }));
@@ -19,6 +21,9 @@ export function createApp({ cardService }: AppDependencies = {}) {
   });
 
   if (cardService) {
+    if (uploadsDirectory) {
+      app.use(createUploadRouter(cardService, uploadsDirectory));
+    }
     app.use('/api/cards', createCardRouter(cardService));
   }
 

@@ -10,6 +10,8 @@ import { migrate } from './db/migrations';
 
 const config = readConfig();
 mkdirSync(config.dataDir, { recursive: true });
+const uploadsDirectory = resolve(config.dataDir, 'uploads');
+mkdirSync(uploadsDirectory, { recursive: true });
 const databaseManager = createDatabaseManager(resolve(config.dataDir, 'gongkao.db'));
 migrate(databaseManager.get());
 const cardService = createCardService({
@@ -18,9 +20,10 @@ const cardService = createCardService({
     apiKey: config.deepseek.apiKey,
     baseUrl: config.deepseek.baseUrl,
   }),
+  uploadsDirectory,
 });
 cardService.recoverStaleProcessing(new Date());
-const app = createApp({ cardService });
+const app = createApp({ cardService, uploadsDirectory });
 
 app.listen(config.port, '127.0.0.1', () => {
   console.log(`Server listening on http://127.0.0.1:${config.port}`);
