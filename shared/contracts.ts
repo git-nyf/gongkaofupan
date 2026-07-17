@@ -67,6 +67,7 @@ export interface CardDetail {
   entryMode: EntryMode;
   rawInput: string;
   rawContentJson: string | null;
+  template: string;
   normalizedStatement: string;
   wrongPoint: string;
   analysis: string;

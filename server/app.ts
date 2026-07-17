@@ -1,8 +1,15 @@
 import express from 'express';
+import type { ErrorRequestHandler } from 'express';
 import { existsSync } from 'node:fs';
 import { resolve } from 'node:path';
+import { createCardRouter } from './cards/routes';
+import type { CardService } from './cards/service';
 
-export function createApp() {
+interface AppDependencies {
+  cardService?: CardService;
+}
+
+export function createApp({ cardService }: AppDependencies = {}) {
   const app = express();
 
   app.use(express.json({ limit: '2mb' }));
@@ -10,6 +17,10 @@ export function createApp() {
   app.get('/api/health', (_request, response) => {
     response.status(200).json({ status: 'ok' });
   });
+
+  if (cardService) {
+    app.use('/api/cards', createCardRouter(cardService));
+  }
 
   const clientDir = resolve(process.cwd(), 'dist/client');
   if (existsSync(clientDir)) {
@@ -43,6 +54,13 @@ export function createApp() {
       response.sendFile(resolve(clientDir, 'index.html'));
     });
   }
+
+  const safeErrorHandler: ErrorRequestHandler = (error, _request, response, _next) => {
+    const status =
+      typeof error === 'object' && error !== null && Reflect.get(error, 'status') === 413 ? 413 : 400;
+    response.status(status).json({ code: 'invalid_request', message: '请求参数不合法' });
+  };
+  app.use(safeErrorHandler);
 
   return app;
 }

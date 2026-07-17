@@ -387,3 +387,41 @@
 - `docs/本地运行与数据管理.md`：补充正文超时与断流不重试、HTTP 失败释放响应体的说明。
 - `progress.md`：仅在文件末尾追加本轮修正、验证证据、改动文件清单和回滚方式。
 - 回滚方式：在本任务提交仍为当前 `HEAD` 时执行 `git revert --no-edit HEAD`。
+
+## 2026-07-17 - Task: 实现卡片保存、自动整理和重试闭环
+
+### What was done
+
+- 新增版本 2 数据库迁移，为卡片持久化模板；全新数据库和已有版本 1 数据库都会按版本顺序升级，重复执行不会重复迁移。
+- 建立卡片原始数据事务、事务外 AI 整理、结果事务和失败补偿闭环；用户固定字段、用户标签、模板和附件元数据在失败与重试时按约定保留。
+- 补齐待整理、待完善、处理中和已完成状态转换，支持五分钟超时回收、单卡重试与启动后最多二十张待整理卡片的连续重试。
+- 新增严格卡片创建与重试接口校验，以稳定中文错误体区分参数错误、不存在、非法状态和内部错误，不返回原始异常或 SQL 信息。
+- 服务启动接入卡片服务，监听前回收超时处理中卡片，监听成功后异步执行待整理批量重试；同步补充本地运行与数据升级说明。
+
+### Testing
+
+- TDD 迁移红灯：先补版本 2 测试并运行 `npx vitest run tests/server/database.test.ts`，十二条中四条按预期失败，原因是只记录版本 1 且 `cards` 不存在 `template` 列。
+- TDD 迁移绿灯：新增 002 并按顺序执行迁移后再次运行数据库专项，十二条测试全部通过，覆盖全新库、版本 1 原数据升级和重复迁移。
+- TDD 卡片红灯：先创建 `tests/server/card-create.test.ts` 并运行专项测试，按预期在收集阶段因 `server/cards/service.ts` 尚不存在而失败。
+- TDD 卡片绿灯：实现最小仓库、服务和路由闭环后运行 `npx vitest run tests/server/card-create.test.ts`，二十三条测试全部通过。
+- `npx vitest run tests/server/database.test.ts tests/server/card-create.test.ts`：通过，两份专项测试共三十五条全部通过。
+- `npm test`：通过，六个测试文件共八十五条测试全部通过，未调用真实网络。
+- `npm run typecheck`：通过，前端与服务端 TypeScript 配置均无类型错误。
+- `npm run build`：通过，成功生成前端与服务端构建产物。
+- `git diff --check`：通过，改动范围仅包含本任务授权文件，未发现空白错误或真实密钥模式。
+
+### Notes
+
+- `server/db/migrations.ts`：改为按已记录版本顺序执行 001 和 002，并保持分类初始化只随版本 1 执行。
+- `server/db/migrations/002_card_template.sql`：为 `cards` 新增非空且默认空字符串的模板字段。
+- `tests/server/database.test.ts`：新增全新库版本 2、版本 1 原数据升级、模板默认值和重复迁移验证。
+- `shared/contracts.ts`：在卡片详情合同中加入持久化模板字段。
+- `server/cards/repository.ts`：新增原始数据、AI 结果、失败补偿、重试状态、批量查询和详情读取的 SQLite 事务实现。
+- `server/cards/service.ts`：新增固定卡片服务接口，编排 AI 调用、状态转换、脱敏错误码、超时回收和批量重试。
+- `server/cards/routes.ts`：新增严格创建与重试请求校验和稳定安全错误映射。
+- `tests/server/card-create.test.ts`：使用真实临时 SQLite 覆盖事务、AI 结果、重试、模板、标签、恢复、批量和 HTTP 校验。
+- `server/app.ts`：通过依赖注入挂载卡片路由，并统一处理请求体解析错误。
+- `server/index.ts`：装配数据库、DeepSeek 与卡片服务，接入监听前恢复和监听后异步批量重试。
+- `docs/本地运行与数据管理.md`：补充模板保存、AI 状态、启动恢复、批量重试和 002 自动升级说明。
+- `progress.md`：仅在文件末尾追加本轮实现、验证证据、改动文件清单和回滚方式。
+- 回滚方式：在本任务提交仍为当前 `HEAD` 时执行 `git revert --no-edit HEAD`。
