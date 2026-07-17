@@ -1011,7 +1011,7 @@ a:focus-visible {
 
 .cards-table {
   width: 100%;
-  min-width: 1040px;
+  min-width: 842px;
   table-layout: fixed;
   border-collapse: collapse;
 }
@@ -1019,8 +1019,6 @@ a:focus-visible {
 .cards-table__select { width: 54px; }
 .cards-table__knowledge { width: 268px; }
 .cards-table__category { width: 108px; }
-.cards-table__rating { width: 94px; }
-.cards-table__mastery { width: 104px; }
 .cards-table__wrong { width: 82px; }
 .cards-table__due { width: 116px; }
 .cards-table__actions { width: 164px; }
@@ -1095,12 +1093,6 @@ a:focus-visible {
 
 .cards-status--ready {
   color: var(--color-success);
-}
-
-.cards-rating {
-  color: #a66e10;
-  font-size: 13px;
-  white-space: nowrap;
 }
 
 .cards-row-actions {

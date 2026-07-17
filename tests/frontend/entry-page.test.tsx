@@ -179,7 +179,7 @@ describe('录入表单', () => {
     expect(screen.getAllByRole('main')).toHaveLength(1);
   });
 
-  it('呈现两种模式、五个可选内容字段和全部属性字段', () => {
+  it('呈现两种模式、五个可选内容字段和录入所需属性字段', () => {
     render(<EntryPage />);
 
     expect(screen.getByRole('radio', { name: '错题录入' })).toBeChecked();
@@ -190,8 +190,8 @@ describe('录入表单', () => {
     expect(screen.getByRole('group', { name: '所属板块' })).toBeInTheDocument();
     expect(screen.getByLabelText('题目来源类型')).toBeInTheDocument();
     expect(screen.getByLabelText('题目来源详情')).toBeInTheDocument();
-    expect(screen.getByLabelText('星级')).toBeInTheDocument();
-    expect(screen.getByLabelText('掌握程度')).toBeInTheDocument();
+    expect(screen.queryByLabelText('星级')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('掌握程度')).not.toBeInTheDocument();
     expect(screen.getByLabelText('标签')).toBeInTheDocument();
     expect(screen.getByLabelText('图片')).toBeInTheDocument();
   });
@@ -272,8 +272,6 @@ describe('录入表单', () => {
     await user.type(screen.getByRole('textbox', { name: '补充笔记' }), '复习地名');
     await user.selectOptions(screen.getByLabelText('题目来源类型'), '历年真题');
     await user.type(screen.getByLabelText('题目来源详情'), '2025 国考');
-    await user.selectOptions(screen.getByLabelText('星级'), '4');
-    await user.selectOptions(screen.getByLabelText('掌握程度'), 'hard');
     await user.type(screen.getByLabelText('标签'), '古今地名， 高频');
 
     const kept = new File(['kept'], '保留.png', { type: 'image/png' });
@@ -309,8 +307,8 @@ describe('录入表单', () => {
       template: '常识判断',
       sourceType: '历年真题',
       sourceDetail: '2025 国考',
-      rating: 4,
-      initialMastery: 'hard',
+      rating: 1,
+      initialMastery: 'unseen',
       attachments: [],
     });
     expect(JSON.parse(payload.rawContentJson)).toMatchObject({ type: 'doc' });
@@ -364,8 +362,6 @@ describe('录入表单', () => {
       template: '言语理解',
       sourceType: '',
       sourceDetail: '',
-      rating: 3,
-      mastery: 'unseen',
     });
     expect(fetchMock.mock.calls.filter(([requestPath]) => requestPath === '/api/cards')).toHaveLength(1);
   });

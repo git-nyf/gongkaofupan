@@ -16,20 +16,15 @@ import type {
   BulkCardUpdateInput,
   CardDetail,
   CardSearchResult,
-  Mastery,
 } from '../../shared/contracts';
 import { api } from '../api/client';
 import { StatusNotice } from '../components/StatusNotice';
 
 type LoadState = 'loading' | 'ready' | 'error';
-type Rating = 1 | 2 | 3 | 4 | 5;
-
 interface FilterState {
   query: string;
   categoryIds: string[];
   tagIds: string[];
-  rating: string;
-  mastery: string;
   aiStatus: string;
   archived: string;
   createdFrom: string;
@@ -37,13 +32,6 @@ interface FilterState {
   page: number;
   pageSize: number;
 }
-
-const masteryLabels: Record<Mastery, string> = {
-  unseen: '未学习',
-  again: '完全不会',
-  hard: '记忆模糊',
-  good: '熟练掌握',
-};
 
 const aiStatusLabels: Record<AiStatus, string> = {
   processing: '整理中',
@@ -60,7 +48,6 @@ export function CardsPage() {
   const [loadState, setLoadState] = useState<LoadState>('loading');
   const [selected, setSelected] = useState<Set<string>>(() => new Set());
   const [detail, setDetail] = useState<CardDetail>();
-  const [bulkRating, setBulkRating] = useState<Rating>(5);
   const [bulkTags, setBulkTags] = useState('');
   const [actionName, setActionName] = useState('');
   const [actionError, setActionError] = useState('');
@@ -207,14 +194,6 @@ export function CardsPage() {
           placeholder="逗号分隔精确 ID"
           value={filters.tagIds.join('，')}
         />
-        <FilterSelect label="星级筛选" onChange={(rating) => setFilter({ rating })} value={filters.rating}>
-          <option value="">全部星级</option>
-          {[1, 2, 3, 4, 5].map((rating) => <option key={rating} value={rating}>{rating} 星</option>)}
-        </FilterSelect>
-        <FilterSelect label="掌握度筛选" onChange={(mastery) => setFilter({ mastery })} value={filters.mastery}>
-          <option value="">全部掌握度</option>
-          {Object.entries(masteryLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
-        </FilterSelect>
         <FilterSelect label="AI 状态筛选" onChange={(aiStatus) => setFilter({ aiStatus })} value={filters.aiStatus}>
           <option value="">全部 AI 状态</option>
           {Object.entries(aiStatusLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
@@ -233,13 +212,6 @@ export function CardsPage() {
       {selected.size > 0 ? (
         <div className="cards-bulk" aria-label="批量操作">
           <strong>已选 {selected.size} 张</strong>
-          <label>
-            <span className="sr-only">批量星级</span>
-            <select aria-label="批量星级" disabled={Boolean(actionName)} onChange={(event) => setBulkRating(Number(event.target.value) as Rating)} value={bulkRating}>
-              {[1, 2, 3, 4, 5].map((rating) => <option key={rating} value={rating}>{rating} 星</option>)}
-            </select>
-          </label>
-          <button disabled={Boolean(actionName)} onClick={() => void bulkUpdate('bulk-rating', { rating: bulkRating })} type="button">批量加星</button>
           <label>
             <span className="sr-only">批量标签</span>
             <input aria-label="批量标签" disabled={Boolean(actionName)} onChange={(event) => setBulkTags(event.target.value)} placeholder="逗号分隔标签" value={bulkTags} />
@@ -324,15 +296,13 @@ function CardTable({
           <col className="cards-table__select" />
           <col className="cards-table__knowledge" />
           <col className="cards-table__category" />
-          <col className="cards-table__rating" />
-          <col className="cards-table__mastery" />
           <col className="cards-table__wrong" />
           <col className="cards-table__due" />
           <col className="cards-table__actions" />
         </colgroup>
         <thead>
           <tr>
-            {['选择', '知识点', '板块', '星级', '掌握度', '错误次数', '下次复习', '操作'].map((label) => <th key={label} scope="col">{label}</th>)}
+            {['选择', '知识点', '板块', '不会标注', '下次复习', '操作'].map((label) => <th key={label} scope="col">{label}</th>)}
           </tr>
         </thead>
         <tbody>
@@ -353,9 +323,7 @@ function CardTable({
                   {card.aiStatus !== 'ready' ? <span className={`cards-status cards-status--${card.aiStatus}`}>{aiStatusLabels[card.aiStatus]}</span> : null}
                 </td>
                 <td>{primaryCategoryNames(card).join('、') || '未分类'}</td>
-                <td><span aria-label={`${card.rating} 星`} className="cards-rating">{'★'.repeat(card.rating)}</span></td>
-                <td>{masteryLabels[card.mastery]}</td>
-                <td>{card.wrongCount}</td>
+                <td><span aria-label={`不会标注 ${card.wrongCount} 次`}>{card.wrongCount}</span></td>
                 <td>{nextDueText(card)}</td>
                 <td>
                   <div className="cards-row-actions">
@@ -439,6 +407,7 @@ function CardDetailDrawer({ card, onClose }: { card: CardDetail; onClose: () => 
           <div><dt>标签</dt><dd>{card.tags.map(({ name }) => name).join('、') || '无'}</dd></div>
           <div><dt>来源</dt><dd>{[card.sourceType, card.sourceDetail].filter(Boolean).join(' · ') || '未填写'}</dd></div>
           <div><dt>附件</dt><dd>{card.attachments.map(({ originalName }) => originalName).join('、') || '无'}</dd></div>
+          <div><dt>不会标注次数</dt><dd>{card.wrongCount} 次</dd></div>
         </dl>
       </aside>
     </div>
@@ -506,8 +475,6 @@ function readFilters(searchParams: URLSearchParams): FilterState {
     query: searchParams.get('query') ?? '',
     categoryIds: searchParams.getAll('categoryIds').filter(Boolean),
     tagIds: searchParams.getAll('tagIds').filter(Boolean),
-    rating: searchParams.get('rating') ?? '',
-    mastery: searchParams.get('mastery') ?? '',
     aiStatus: searchParams.get('aiStatus') ?? '',
     archived: searchParams.get('archived') === 'true' ? 'true' : 'false',
     createdFrom: searchParams.get('createdFrom') ?? '',
@@ -527,8 +494,6 @@ function updateSearchParams(
   if (next.query) params.set('query', next.query);
   next.categoryIds.forEach((id) => params.append('categoryIds', id));
   next.tagIds.forEach((id) => params.append('tagIds', id));
-  if (next.rating) params.set('rating', next.rating);
-  if (next.mastery) params.set('mastery', next.mastery);
   if (next.aiStatus) params.set('aiStatus', next.aiStatus);
   params.set('archived', next.archived);
   if (next.createdFrom) params.set('createdFrom', next.createdFrom);
@@ -543,8 +508,6 @@ function buildSearchPath(filters: FilterState) {
   params.set('query', filters.query);
   filters.categoryIds.forEach((id) => params.append('categoryIds', id));
   filters.tagIds.forEach((id) => params.append('tagIds', id));
-  if (filters.rating) params.set('rating', filters.rating);
-  if (filters.mastery) params.set('mastery', filters.mastery);
   if (filters.aiStatus) params.set('aiStatus', filters.aiStatus);
   params.set('archived', filters.archived);
   if (filters.createdFrom) params.set('createdFrom', filters.createdFrom);

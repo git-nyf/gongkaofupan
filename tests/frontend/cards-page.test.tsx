@@ -102,7 +102,7 @@ afterEach(() => {
 });
 
 describe('卡片库筛选与状态', () => {
-  it('从 URL 恢复全部筛选并以重复键请求卡片列表', async () => {
+  it('从 URL 恢复现有筛选、忽略旧筛选并以重复键请求卡片列表', async () => {
     const fetchMock = vi.mocked(fetch).mockResolvedValue(jsonResponse(searchResult([])));
     renderAt(
       '/cards?query=广陵&categoryIds=常识判断&categoryIds=政治理论&tagIds=tag-a&tagIds=tag-b&rating=4&mastery=hard&aiStatus=needs_input&archived=true&createdFrom=2026-07-01&createdTo=2026-07-17&page=3&pageSize=50',
@@ -111,8 +111,8 @@ describe('卡片库筛选与状态', () => {
     expect(await screen.findByRole('textbox', { name: '搜索卡片' })).toHaveValue('广陵');
     expect(screen.getByLabelText('板块编号')).toHaveValue('常识判断，政治理论');
     expect(screen.getByLabelText('标签编号')).toHaveValue('tag-a，tag-b');
-    expect(screen.getByLabelText('星级筛选')).toHaveValue('4');
-    expect(screen.getByLabelText('掌握度筛选')).toHaveValue('hard');
+    expect(screen.queryByLabelText('星级筛选')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('掌握度筛选')).not.toBeInTheDocument();
     expect(screen.getByLabelText('AI 状态筛选')).toHaveValue('needs_input');
     expect(screen.getByLabelText('归档状态筛选')).toHaveValue('true');
     expect(screen.getByLabelText('录入开始日期')).toHaveValue('2026-07-01');
@@ -125,8 +125,6 @@ describe('卡片库筛选与状态', () => {
     expect(requested.searchParams.getAll('categoryIds')).toEqual(['常识判断', '政治理论']);
     expect(requested.searchParams.getAll('tagIds')).toEqual(['tag-a', 'tag-b']);
     expect(Object.fromEntries(requested.searchParams)).toMatchObject({
-      rating: '4',
-      mastery: 'hard',
       aiStatus: 'needs_input',
       archived: 'true',
       createdFrom: '2026-07-01',
@@ -134,6 +132,8 @@ describe('卡片库筛选与状态', () => {
       page: '3',
       pageSize: '50',
     });
+    expect(requested.searchParams.has('rating')).toBe(false);
+    expect(requested.searchParams.has('mastery')).toBe(false);
   });
 
   it('搜索严格等待 300ms 后同步 URL 并请求，旧响应不会覆盖新结果', async () => {
@@ -247,15 +247,24 @@ describe('卡片库表格和管理操作', () => {
     const user = userEvent.setup();
     renderAt('/cards');
 
-    for (const name of ['选择', '知识点', '板块', '星级', '掌握度', '错误次数', '下次复习', '操作']) {
-      expect(await screen.findByRole('columnheader', { name })).toBeInTheDocument();
-    }
+    expect((await screen.findAllByRole('columnheader')).map((header) => header.textContent)).toEqual([
+      '选择',
+      '知识点',
+      '板块',
+      '不会标注',
+      '下次复习',
+      '操作',
+    ]);
+    expect(within(screen.getByRole('table')).getAllByRole('cell', { name: '不会标注 2 次' })).toHaveLength(2);
     expect(within(screen.getByRole('table')).getByText('待完善')).toBeInTheDocument();
     expect(within(screen.getByRole('table')).getByText('待整理')).toBeInTheDocument();
     expect(screen.queryByText('广陵=扬州')).not.toBeInTheDocument();
 
     await user.click(screen.getByRole('button', { name: '查看广陵与扬州为对应关系详情' }));
-    expect(screen.getByRole('dialog', { name: '卡片详情' })).toHaveTextContent('广陵=扬州');
+    const detail = screen.getByRole('dialog', { name: '卡片详情' });
+    expect(detail).toHaveTextContent('广陵=扬州');
+    expect(within(detail).getByText('不会标注次数')).toBeInTheDocument();
+    expect(within(detail).getByText('2 次')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '关闭详情' })).toHaveAttribute('title', '关闭详情');
   });
 
@@ -285,7 +294,7 @@ describe('卡片库表格和管理操作', () => {
     expect(screen.getByRole('dialog', { name: '卡片详情' })).toHaveTextContent(rawInput);
   });
 
-  it('选中后分别批量加星、添加标签和归档，成功刷新并清空选择', async () => {
+  it('选中后只提供批量添加标签和归档，成功刷新并清空选择', async () => {
     const requests: Array<{ path: string; init?: RequestInit }> = [];
     const fetchMock = vi.mocked(fetch).mockImplementation(async (input, init) => {
       const path = String(input);
@@ -299,22 +308,18 @@ describe('卡片库表格和管理操作', () => {
     expect(screen.queryByRole('button', { name: '批量归档' })).not.toBeInTheDocument();
 
     await user.click(checkbox);
-    await user.selectOptions(screen.getByLabelText('批量星级'), '5');
-    await user.click(screen.getByRole('button', { name: '批量加星' }));
+    expect(screen.queryByLabelText('批量星级')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '批量加星' })).not.toBeInTheDocument();
+    await user.type(screen.getByLabelText('批量标签'), ' 高频，冲刺 ');
+    await user.click(screen.getByRole('button', { name: '批量添加标签' }));
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3));
-    expect(JSON.parse(String(requests[1]?.init?.body))).toEqual({ ids: ['card-1'], rating: 5 });
+    expect(JSON.parse(String(requests[1]?.init?.body))).toEqual({ ids: ['card-1'], tags: ['高频', '冲刺'] });
     expect(checkbox).not.toBeChecked();
 
     await user.click(checkbox);
-    await user.type(screen.getByLabelText('批量标签'), ' 高频，冲刺 ');
-    await user.click(screen.getByRole('button', { name: '批量添加标签' }));
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(5));
-    expect(JSON.parse(String(requests[3]?.init?.body))).toEqual({ ids: ['card-1'], tags: ['高频', '冲刺'] });
-
-    await user.click(checkbox);
     await user.click(screen.getByRole('button', { name: '批量归档' }));
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(7));
-    expect(JSON.parse(String(requests[5]?.init?.body))).toEqual({ ids: ['card-1'], archived: true });
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(5));
+    expect(JSON.parse(String(requests[3]?.init?.body))).toEqual({ ids: ['card-1'], archived: true });
   });
 
   it('筛选请求开始后立即清空旧选择，请求失败也不能批量提交旧编号', async () => {
@@ -328,7 +333,7 @@ describe('卡片库表格和管理操作', () => {
 
     await user.click(await screen.findByRole('checkbox', { name: '选择广陵与扬州为对应关系' }));
     expect(screen.getByRole('button', { name: '批量归档' })).toBeInTheDocument();
-    await user.selectOptions(screen.getByLabelText('星级筛选'), '5');
+    await user.selectOptions(screen.getByLabelText('AI 状态筛选'), 'pending');
     expect(screen.queryByRole('button', { name: '批量归档' })).not.toBeInTheDocument();
 
     await act(async () => rejectFilter?.(new Error('filter failed')));

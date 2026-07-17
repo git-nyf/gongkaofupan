@@ -1,14 +1,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import { CircleAlert, CircleCheck, FileImage, LoaderCircle, Plus, Save, Trash2, X } from 'lucide-react';
 import { useInRouterContext, useSearchParams } from 'react-router-dom';
-import type { CardDetail, CardUpdateInput, CreateCardInput, EntryMode, Mastery } from '../../shared/contracts';
+import type { CardDetail, CardUpdateInput, CreateCardInput, EntryMode } from '../../shared/contracts';
 import { categoryCatalog } from '../../server/catalog/categories';
 import { api, apiForm } from '../api/client';
 import { entryTemplates } from '../catalog/templates';
 import { RichTextEditor } from '../components/RichTextEditor';
 import { StatusNotice } from '../components/StatusNotice';
 
-type Rating = 1 | 2 | 3 | 4 | 5;
 type SaveState = 'idle' | 'saving' | 'ready' | 'pending' | 'needs_input' | 'error';
 type EditLoadState = 'idle' | 'loading' | 'ready' | 'error';
 
@@ -58,8 +57,6 @@ function EntryForm({ editId }: { editId?: string }) {
   const [selectedSecondary, setSelectedSecondary] = useState<string[]>([]);
   const [sourceType, setSourceType] = useState('');
   const [sourceDetail, setSourceDetail] = useState('');
-  const [rating, setRating] = useState<Rating>(3);
-  const [mastery, setMastery] = useState<Mastery>('unseen');
   const [tagText, setTagText] = useState('');
   const [stagedFiles, setStagedFiles] = useState<File[]>([]);
   const [persistedAttachments, setPersistedAttachments] = useState<PersistedAttachment[]>([]);
@@ -100,8 +97,6 @@ function EntryForm({ editId }: { editId?: string }) {
     );
     setSourceType(detail.sourceType);
     setSourceDetail(detail.sourceDetail);
-    setRating(detail.rating as Rating);
-    setMastery(detail.mastery);
     setTagText(detail.tags.filter(({ origin }) => origin === 'user').map(({ name }) => name).join('，'));
     setStagedFiles([]);
     setPersistedAttachments(
@@ -158,8 +153,6 @@ function EntryForm({ editId }: { editId?: string }) {
     setSelectedSecondary([]);
     setSourceType('');
     setSourceDetail('');
-    setRating(3);
-    setMastery('unseen');
     setTagText('');
     setStagedFiles([]);
     setPersistedAttachments([]);
@@ -237,8 +230,6 @@ function EntryForm({ editId }: { editId?: string }) {
             template: templateName,
             sourceType,
             sourceDetail,
-            rating,
-            mastery,
           })
         : await createCard(
             {
@@ -255,8 +246,8 @@ function EntryForm({ editId }: { editId?: string }) {
               template: templateName,
               sourceType,
               sourceDetail,
-              rating,
-              initialMastery: mastery,
+              rating: 1,
+              initialMastery: 'unseen',
               attachments: [],
             },
             stagedFiles,
@@ -457,24 +448,6 @@ function EntryForm({ editId }: { editId?: string }) {
               </select>
               <label className="entry-property__sub-label" htmlFor="entry-source-detail">题目来源详情</label>
               <input id="entry-source-detail" onChange={(event) => setSourceDetail(event.target.value)} placeholder="年份、考试或资料名称" value={sourceDetail} />
-            </div>
-
-            <div className="entry-properties__row">
-              <label className="entry-property">
-                <span>星级</span>
-                <select aria-label="星级" onChange={(event) => setRating(Number(event.target.value) as Rating)} value={rating}>
-                  {[1, 2, 3, 4, 5].map((item) => <option key={item} value={item}>{item} 星</option>)}
-                </select>
-              </label>
-              <label className="entry-property">
-                <span>掌握程度</span>
-                <select aria-label="掌握程度" onChange={(event) => setMastery(event.target.value as Mastery)} value={mastery}>
-                  <option value="unseen">未学习</option>
-                  <option value="again">完全不会</option>
-                  <option value="hard">记忆模糊</option>
-                  <option value="good">熟练掌握</option>
-                </select>
-              </label>
             </div>
 
             <div className="entry-property">
