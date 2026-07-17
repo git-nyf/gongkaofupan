@@ -7,14 +7,25 @@ import type { CardService } from './cards/service';
 import { createUploadRouter } from './uploads/routes';
 import { createStudyRouter } from './study/routes';
 import type { StudyService } from './study/service';
+import { createAnalyticsRouter } from './analytics/routes';
+import type { AnalyticsService } from './analytics/service';
+import { createSettingsRouter, type SettingsRouterDependencies } from './settings/routes';
 
 interface AppDependencies {
   cardService?: CardService;
   studyService?: StudyService;
+  analyticsService?: AnalyticsService;
+  settings?: SettingsRouterDependencies;
   uploadsDirectory?: string;
 }
 
-export function createApp({ cardService, studyService, uploadsDirectory }: AppDependencies = {}) {
+export function createApp({
+  cardService,
+  studyService,
+  analyticsService,
+  settings,
+  uploadsDirectory,
+}: AppDependencies = {}) {
   const app = express();
 
   app.use(express.json({ limit: '2mb' }));
@@ -32,6 +43,14 @@ export function createApp({ cardService, studyService, uploadsDirectory }: AppDe
 
   if (studyService) {
     app.use(createStudyRouter(studyService));
+  }
+
+  if (analyticsService) {
+    app.use(createAnalyticsRouter(analyticsService));
+  }
+
+  if (settings) {
+    app.use(createSettingsRouter(settings));
   }
 
   const clientDir = resolve(process.cwd(), 'dist/client');

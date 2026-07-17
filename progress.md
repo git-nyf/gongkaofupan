@@ -585,3 +585,35 @@
 - `docs/本地运行与数据管理.md`：明确空白编号会被忽略，归一化后空数组仍有效。
 - `progress.md`：仅在文件末尾追加本轮修正、验证证据、改动文件清单和回滚方式。
 - 回滚方式：在本任务提交仍为当前 `HEAD` 时执行 `git revert --no-edit HEAD`。
+
+## 2026-07-17 - Task: 增加总览、复盘和非敏感设置接口
+
+### What was done
+
+- 新增总览和复盘统计接口，按本机今日边界统计到期、新增和待攻克卡片；薄弱板块只使用真实复习日志计算 `again × 2 + hard`，高频错题按 `again` 次数和最近错误时间排序。
+- 新增非敏感设置读取和修改接口，默认背诵数量、顺序和到期优先分别持久化到现有 `app_settings` 键值表；请求只允许三个既定字段。
+- DeepSeek 配置状态只由注入密钥去除空白后是否非空决定，响应和 SQLite 均不包含密钥或密钥片段。
+- 应用工厂增加统计服务和设置依赖的可选装配，未提供依赖时保持既有接口行为。
+
+### Testing
+
+- TDD 首次红灯：先运行 `npx vitest run tests/server/analytics.test.ts tests/server/settings.test.ts`，统计测试因目标服务模块不存在而收集失败；设置测试四项中三项因接口返回 404 按预期失败，一项未装配时返回 404 的兼容性测试通过。
+- 首次最小实现后同一专项命令八项中七项通过；唯一失败为待整理卡片被错误计入待攻克，实际为三张而预期为两张。将待攻克收紧为未归档且状态为 `ready` 的薄弱卡后，专项两个文件共八项全部通过。
+- `npm test`：通过，十二个测试文件共一百六十二项全部通过；全部数据使用本地临时 SQLite，未访问真实网络。
+- `npm run typecheck`：通过，前端与服务端 TypeScript 配置均无类型错误。
+- `npm run build`：通过，成功生成前端与服务端构建产物。
+- `git diff --check`：通过，未发现空白格式错误；仅输出既有 Windows 工作区的 LF/CRLF 转换提示。
+- 使用 PowerShell `Select-String` 扫描 `server`、`tests` 和 `docs` 中的 `sk-[A-Za-z0-9]{20,}` 模式，结果为零条匹配。
+
+### Notes
+
+- `server/analytics/service.ts`：新增本机日界统计、薄弱板块聚合和高频错题排序。
+- `server/analytics/routes.ts`：新增总览与复盘查询接口和脱敏失败响应。
+- `server/settings/routes.ts`：新增设置默认值、严格请求校验、键值持久化和非敏感 DeepSeek 配置状态。
+- `server/app.ts`：新增统计服务与设置依赖的可选路由装配。
+- `tests/server/analytics.test.ts`：覆盖今日边界、可背诵状态、薄弱分、涉及卡片数、高频错题排序和未装配兼容性。
+- `tests/server/settings.test.ts`：覆盖默认值、配置状态、部分更新、重建应用后的持久化、非法输入和密钥隔离。
+- `docs/本地运行与数据管理.md`：补充总览、复盘和设置接口的字段、统计口径、默认值与敏感数据边界。
+- `progress.md`：仅在文件末尾追加本轮实现、验证证据、改动文件清单和回滚方式。
+- `server/index.ts` 不在本任务授权范围内，本轮未修改；生产入口仍需创建统计服务，并把数据库 manager 与本机密钥作为设置依赖传入 `createApp` 后，新增接口才会在实际启动服务中装配。
+- 回滚方式：在本任务提交仍为当前 `HEAD` 时执行 `git revert --no-edit HEAD`。
