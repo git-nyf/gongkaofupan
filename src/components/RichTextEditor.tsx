@@ -1,13 +1,8 @@
 import { useEffect, useMemo } from 'react';
-import type { JSONContent } from '@tiptap/core';
-import Bold from '@tiptap/extension-bold';
 import Color from '@tiptap/extension-color';
-import Document from '@tiptap/extension-document';
-import History from '@tiptap/extension-history';
-import Paragraph from '@tiptap/extension-paragraph';
-import Text from '@tiptap/extension-text';
 import TextStyle from '@tiptap/extension-text-style';
-import { EditorContent, useEditor } from '@tiptap/react';
+import { EditorContent, useEditor, type JSONContent } from '@tiptap/react';
+import StarterKit from '@tiptap/starter-kit';
 import { Bold as BoldIcon, Sigma } from 'lucide-react';
 
 interface RichTextEditorProps {
@@ -21,7 +16,26 @@ const emptyDocument: JSONContent = {
   content: [{ type: 'paragraph' }],
 };
 
-const editorExtensions = [Document, Paragraph, Text, Bold, TextStyle, Color, History];
+const editorExtensions = [
+  StarterKit.configure({
+    blockquote: false,
+    bulletList: false,
+    code: false,
+    codeBlock: false,
+    dropcursor: false,
+    gapcursor: false,
+    hardBreak: false,
+    heading: false,
+    history: false,
+    horizontalRule: false,
+    italic: false,
+    listItem: false,
+    orderedList: false,
+    strike: false,
+  }),
+  TextStyle,
+  Color,
+];
 const formulaText = '现期量 = 基期量 × (1 + 增长率)';
 const editorColors = [
   { name: '朱红', value: '#c64232' },

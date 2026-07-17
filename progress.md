@@ -881,3 +881,29 @@
 - `docs/本地运行与数据管理.md`：补充录入页使用方法、请求顺序和当前附件更新边界。
 - `progress.md`：仅在文件末尾追加本轮实现、验证证据、改动文件清单和回滚方式。
 - 回滚方式：在本任务提交仍为当前 `HEAD` 时执行 `git revert --no-edit HEAD`。
+
+## 2026-07-17 - Task: 修正录入编辑器依赖边界与页面地标
+
+### What was done
+
+- 录入编辑器改为使用项目直接声明的 TipTap StarterKit，并显式关闭历史记录、标题、引用、列表、代码、斜体、删除线、硬换行、水平线、光标辅助等非白名单扩展，只保留文档、段落、文本和加粗，再组合直接声明的文字样式与颜色扩展。
+- 保持纯文本粘贴和受控 JSON 白名单校验，富 HTML 不会生成标题、列表、代码等节点；禁用历史记录后，编辑器不响应撤销快捷键。
+- 把录入页内部内容区域从 `main` 地标改为普通布局容器，保留原 class 和视觉布局，使应用外壳内始终只有一个主内容地标。
+
+### Testing
+
+- TDD 红灯：`npx vitest run tests/frontend/entry-page.test.tsx` 共十二项，十项通过、两项失败；失败分别确认录入路由存在两个 `main` 地标，以及输入内容会被 `Ctrl+Z` 撤销为空。
+- 定向测试：`npx vitest run tests/frontend/entry-page.test.tsx` 通过，一个测试文件共十二项全部通过；新增覆盖单一 `main` 地标、禁用撤销和富 HTML 粘贴后的 `doc`、`paragraph`、`text` 节点白名单。
+- `npm test`：通过，十五个测试文件共二百四十一项全部通过。
+- `npm run typecheck`：通过，前端与服务端 TypeScript 配置均无类型错误。
+- `npm run build`：通过，前端入口脚本为 521.62 KB，服务端产物为 107.20 KB；StarterKit 按规范替代独立扩展导入后，Vite 给出前端单块超过 500 KB 的体积提示，本轮未扩大到代码分包。
+- 静态核对：编辑器不再直接导入 Bold、Document、History、Paragraph、Text 等传递扩展，所有非白名单 StarterKit 扩展均显式关闭；录入页内部不再包含 `main` 标签。
+- `git diff --check`：通过，仅输出既有 Windows 工作区的 LF/CRLF 转换提示。
+
+### Notes
+
+- `src/components/RichTextEditor.tsx`：改用已声明的 StarterKit，显式关闭历史记录和全部非白名单扩展。
+- `src/pages/EntryPage.tsx`：移除应用外壳内重复的主内容地标并保持原布局 class。
+- `tests/frontend/entry-page.test.tsx`：新增撤销禁用、粘贴节点白名单和单一地标回归测试。
+- `progress.md`：仅在文件末尾追加本轮规范修复、验证证据、改动文件清单和回滚方式。
+- 回滚方式：在本修复提交仍为当前 `HEAD` 时执行 `git revert --no-edit HEAD`。

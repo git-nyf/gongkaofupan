@@ -249,7 +249,7 @@ export function EntryPage() {
         </div>
 
         <div className="entry-layout">
-          <main className="entry-content">
+          <div className="entry-content">
             <div className="entry-field entry-field--raw">
               <label className="entry-field__label">原始内容 <span aria-hidden="true">*</span></label>
               <RichTextEditor
@@ -306,7 +306,7 @@ export function EntryPage() {
                 </div>
               ))}
             </div>
-          </main>
+          </div>
 
           <aside className="entry-properties" aria-label="卡片属性">
             <CategoryFields

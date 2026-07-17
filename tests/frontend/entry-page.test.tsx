@@ -4,6 +4,7 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/re
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { CardDetail } from '../../shared/contracts';
+import App from '../../src/App';
 import { EntryPage } from '../../src/pages/EntryPage';
 
 const templateExpectations = [
@@ -170,6 +171,14 @@ describe('七套录入模板', () => {
 });
 
 describe('录入表单', () => {
+  it('在应用外壳内只保留一个 main 地标', () => {
+    window.history.pushState({}, '', '/entry');
+
+    render(<App />);
+
+    expect(screen.getAllByRole('main')).toHaveLength(1);
+  });
+
   it('呈现两种模式、五个可选内容字段和全部属性字段', () => {
     render(<EntryPage />);
 
@@ -199,7 +208,21 @@ describe('录入表单', () => {
     expect(fetch).not.toHaveBeenCalled();
   });
 
-  it('只启用加粗、颜色和公式文本工具，并将 HTML 粘贴为纯文本', async () => {
+  it('禁用编辑器历史记录，Ctrl+Z 不撤销已经输入的内容', async () => {
+    const user = userEvent.setup();
+    render(<EntryPage />);
+
+    const editor = screen.getByRole('textbox', { name: '原始内容' });
+    await user.click(editor);
+    await user.keyboard('不可撤销内容');
+    await user.keyboard('{Control>}z{/Control}');
+
+    expect(editor).toHaveTextContent('不可撤销内容');
+  });
+
+  it('只启用加粗、颜色和公式文本工具，并将富 HTML 粘贴为纯文本节点', async () => {
+    const user = userEvent.setup();
+    const fetchMock = vi.mocked(fetch).mockResolvedValue(jsonResponse(card(), 201));
     render(<EntryPage />);
 
     expect(screen.getByRole('button', { name: '加粗' })).toHaveAttribute('title', '加粗');
@@ -210,12 +233,26 @@ describe('录入表单', () => {
     const editor = screen.getByRole('textbox', { name: '原始内容' });
     fireEvent.paste(editor, {
       clipboardData: {
-        getData: (type: string) => (type === 'text/plain' ? '纯文本内容' : '<strong>恶意 HTML</strong>'),
+        getData: (type: string) =>
+          type === 'text/plain'
+            ? '纯文本内容'
+            : '<h1>恶意 HTML</h1><ul><li>列表</li></ul><pre><code>代码</code></pre>',
       },
     });
 
     await waitFor(() => expect(editor).toHaveTextContent('纯文本内容'));
     expect(editor).not.toHaveTextContent('恶意 HTML');
+
+    await user.click(screen.getByRole('checkbox', { name: '常识判断' }));
+    await user.click(screen.getByRole('checkbox', { name: '文史' }));
+    await user.click(screen.getByRole('button', { name: '保存并自动整理' }));
+    await screen.findByText('已生成 2 个背诵方向');
+
+    const formData = fetchMock.mock.calls[0]?.[1]?.body as FormData;
+    const payload = JSON.parse(String(formData.get('payload')));
+    const rawContent = JSON.parse(payload.rawContentJson);
+    expect(collectNodeTypes(rawContent)).toEqual(new Set(['doc', 'paragraph', 'text']));
+    expect(payload.rawContentJson).not.toMatch(/heading|bulletList|orderedList|listItem|codeBlock|code/);
   });
 
   it('暂存并移除图片，首次保存只发送一次完整 FormData 创建请求', async () => {
@@ -382,3 +419,13 @@ describe('录入表单', () => {
     expect(saveButton).toBeEnabled();
   });
 });
+
+function collectNodeTypes(value: unknown, types = new Set<string>()) {
+  if (typeof value !== 'object' || value === null) return types;
+  const record = value as Record<string, unknown>;
+  if (typeof record.type === 'string') types.add(record.type);
+  if (Array.isArray(record.content)) {
+    for (const child of record.content) collectNodeTypes(child, types);
+  }
+  return types;
+}
