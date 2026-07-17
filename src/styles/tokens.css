@@ -1,0 +1,18 @@
+:root {
+  --color-ink: #23262b;
+  --color-ink-soft: #343940;
+  --color-accent: #c64232;
+  --color-accent-soft: #f9ecea;
+  --color-canvas: #eef0f2;
+  --color-surface: #ffffff;
+  --color-border: #dcdee2;
+  --color-text: #23262b;
+  --color-muted: #777d85;
+  --color-success: #28735e;
+  --color-warning: #8a6314;
+  --color-error: #a5382c;
+  --radius: 6px;
+  --sidebar-width: 168px;
+  --sidebar-collapsed-width: 64px;
+  --tool-height: 36px;
+}

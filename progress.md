@@ -778,3 +778,42 @@
 - `docs/本地运行与数据管理.md`：明确回滚点完整发布后才开始替换，以及准备失败时当前数据保持不变。
 - `progress.md`：仅在文件末尾追加本轮缺陷修正、验证证据、改动文件清单和回滚方式。
 - 回滚方式：在本修正提交仍为当前 `HEAD` 时执行 `git revert --no-edit HEAD`。
+
+## 2026-07-17 - Task: 建立桌面工作台和六个页面路由
+
+### What was done
+
+- 建立由应用自身持有的浏览器路由和紧凑左侧导航，固定提供总览、录入、背诵、卡片库、复盘和设置六个入口；默认侧栏宽 168 像素，可通过底部图标按钮折叠到 64 像素，折叠后仍保留可访问名称和悬停标题。
+- 落实炭灰、朱红、浅灰画布、语义状态色、6 像素圆角、36 像素工具按钮和最低 1024 像素桌面宽度等统一设计变量；六个页面保持开放布局，只显示真实标题和必要空状态，不提前实现后续业务功能。
+- 增加统一 JSON 与表单请求客户端和四态状态提示；JSON 请求安全合并 `Headers`，表单上传不手动设置 `Content-Type`，接口错误统一为带名称、状态码和错误码的 `ApiError`。
+- 更新本地运行文档，明确六个页面地址、桌面最小宽度和侧栏折叠行为。
+
+### Testing
+
+- TDD 红灯：首次运行 `npx vitest run tests/frontend/app-shell.test.tsx` 时，测试文件因统一 API 客户端尚不存在而收集失败，明确命中新任务能力缺失。
+- 定向测试：`npx vitest run tests/frontend/app-shell.test.tsx tests/frontend/app.test.tsx` 通过，两个测试文件共十五项全部通过，覆盖六入口、链接、路由标题、激活态、折叠可访问性、四种状态提示、请求头合并、表单边界、接口错误和旧首页产品名断言。
+- `npm test`：通过，十四个测试文件共二百二十七项全部通过，未访问真实网络。
+- `npm run typecheck`：通过，前端与服务端 TypeScript 配置均无类型错误。
+- `npm run build`：通过，前端与服务端构建成功；前端入口脚本为 190.79 KB，服务端产物为 107.20 KB。
+- 浏览器验证：使用本机 Chromium 逐一检查六个路由在 1440×900 和 1024×768 两种视口下的展开状态，页面宽度均等于视口宽度且无横向溢出；展开侧栏为 168 像素，折叠后为 64 像素。展开与折叠截图经图片目检，品牌、标题、导航、状态行和折叠按钮无重叠或裁切；实测画布为 `#eef0f2`、侧栏为 `#23262b`、标题为 24 像素。
+- `git diff --check`：通过，仅输出既有 Windows 工作区的 LF/CRLF 转换提示；本轮临时浏览器服务已停止，临时截图不进入版本库。
+
+### Notes
+
+- `src/api/client.ts`：新增统一 JSON、表单请求和 `ApiError` 错误契约。
+- `src/components/AppShell.tsx`：新增品牌、六项 Lucide 导航和可访问折叠按钮组成的桌面外壳。
+- `src/components/StatusNotice.tsx`：新增加载、空、错误和成功四种稳定状态区域。
+- `src/styles/tokens.css`：新增已批准的颜色、尺寸、圆角和侧栏设计变量。
+- `src/styles/global.css`：新增桌面画布、侧栏、导航、页面标题和状态提示的全局样式。
+- `src/pages/DashboardPage.tsx`：新增总览页标题和空状态边界。
+- `src/pages/EntryPage.tsx`：新增录入页标题和空状态边界。
+- `src/pages/StudyPage.tsx`：新增背诵页标题和空状态边界。
+- `src/pages/CardsPage.tsx`：新增卡片库页标题和空状态边界。
+- `src/pages/ReviewPage.tsx`：新增复盘页标题和空状态边界。
+- `src/pages/SettingsPage.tsx`：新增设置页标题和空状态边界。
+- `src/App.tsx`：改为由应用自身组合浏览器路由、桌面外壳和六个页面。
+- `src/main.tsx`：加载全局样式并保持入口不重复包裹路由。
+- `tests/frontend/app-shell.test.tsx`：新增工作台、状态提示和统一 API 客户端回归测试。
+- `docs/本地运行与数据管理.md`：补充六个页面地址、桌面范围和侧栏折叠说明。
+- `progress.md`：仅在文件末尾追加本轮实现、验证证据、改动文件清单和回滚方式。
+- 回滚方式：在本任务提交仍为当前 `HEAD` 时执行 `git revert --no-edit HEAD`。
