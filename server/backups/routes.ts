@@ -29,6 +29,44 @@ const upload = multer({
 
 class InvalidBackupUploadError extends Error {}
 
+const invalidMulterCodes = new Set([
+  'LIMIT_PART_COUNT',
+  'LIMIT_FILE_COUNT',
+  'LIMIT_FIELD_KEY',
+  'LIMIT_FIELD_VALUE',
+  'LIMIT_FIELD_COUNT',
+  'LIMIT_UNEXPECTED_FILE',
+  'LIMIT_FIELD_NESTING',
+  'MISSING_FIELD_NAME',
+]);
+
+export function mapBackupUploadError(error: unknown) {
+  if (error instanceof InvalidBackupUploadError) {
+    return {
+      status: 400,
+      body: { code: 'invalid_request', message: '恢复请求不合法' },
+    };
+  }
+  if (error instanceof multer.MulterError) {
+    if (error.code === 'LIMIT_FILE_SIZE') {
+      return {
+        status: 413,
+        body: { code: 'file_too_large', message: '备份文件不能超过 512MB' },
+      };
+    }
+    if (invalidMulterCodes.has(error.code)) {
+      return {
+        status: 400,
+        body: { code: 'invalid_request', message: '恢复请求不合法' },
+      };
+    }
+  }
+  return {
+    status: 500,
+    body: { code: 'internal_error', message: '备份恢复处理失败' },
+  };
+}
+
 export function createBackupRouter(service: BackupService) {
   const router = express.Router();
 
@@ -85,11 +123,8 @@ async function restoreUploadedBackup(
 }
 
 function sendUploadError(response: express.Response, error: unknown) {
-  if (error instanceof multer.MulterError && error.code === 'LIMIT_FILE_SIZE') {
-    response.status(413).json({ code: 'file_too_large', message: '备份文件不能超过 512MB' });
-    return;
-  }
-  sendInvalidRequest(response);
+  const mapped = mapBackupUploadError(error);
+  response.status(mapped.status).json(mapped.body);
 }
 
 function sendInvalidRequest(response: express.Response) {

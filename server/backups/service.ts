@@ -1,7 +1,17 @@
 import { randomUUID } from 'node:crypto';
-import { createReadStream, createWriteStream } from 'node:fs';
 import {
-  access,
+  copyFileSync,
+  createReadStream,
+  createWriteStream,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  readdirSync,
+  renameSync,
+  rmSync,
+  statSync,
+} from 'node:fs';
+import {
   mkdir,
   readdir,
   readFile,
@@ -9,16 +19,20 @@ import {
   rm,
 } from 'node:fs/promises';
 import path from 'node:path';
-import { pipeline } from 'node:stream/promises';
+import { Transform } from 'node:stream';
+import { finished, pipeline } from 'node:stream/promises';
 import archiver from 'archiver';
 import Database from 'better-sqlite3';
 import unzipper, { type Entry, type File as ZipFile } from 'unzipper';
+import { migrate } from '../db/migrations';
 
 const backupFormat = 'gongkao-memory-card-backup';
 const backupSchemaVersion = 1;
-const currentDatabaseVersion = 2;
 const maximumEntryCount = 10_000;
 const maximumUncompressedBytes = 1024 * 1024 * 1024;
+const maximumManifestBytes = 64 * 1024;
+const maximumImageBytes = 10 * 1024 * 1024;
+const allowedImageExtensions = new Set(['.png', '.jpg', '.jpeg', '.webp']);
 
 interface DatabaseManager {
   get(): Database.Database;
@@ -42,6 +56,7 @@ interface BackupServiceDependencies {
   uploadsDirectory: string;
   now?: () => Date;
   applyUploads?: typeof replaceUploads;
+  cleanupPaths?: typeof cleanupRestorePaths;
 }
 
 interface Manifest {
@@ -55,12 +70,20 @@ interface PreparedRestore {
   uploadsPath: string;
 }
 
+interface ExpectedZipEntry {
+  type: 'File' | 'Directory';
+  uncompressedSize: number;
+  flags: number;
+  compressionMethod: number;
+}
+
 export function createBackupService({
   database,
   dataDirectory,
   uploadsDirectory,
   now = () => new Date(),
   applyUploads = replaceUploads,
+  cleanupPaths = cleanupRestorePaths,
 }: BackupServiceDependencies): BackupService {
   const dataRoot = path.resolve(dataDirectory);
   const uploadsRoot = path.resolve(uploadsDirectory);
@@ -71,8 +94,11 @@ export function createBackupService({
       await mkdir(backupsRoot, { recursive: true });
       const createdAt = now();
       const fileName = `公考记忆卡备份-${formatTimestamp(createdAt)}.zip`;
-      const filePath = path.join(backupsRoot, fileName);
       const workingId = randomUUID();
+      const filePath = path.join(
+        backupsRoot,
+        `backup-${formatTimestamp(createdAt)}-${workingId}.zip`,
+      );
       const snapshotPath = path.join(backupsRoot, `snapshot-${workingId}.db`);
       const archivePath = path.join(backupsRoot, `backup-${workingId}.tmp`);
 
@@ -88,7 +114,6 @@ export function createBackupService({
             createdAt: createdAt.toISOString(),
           },
         });
-        await rm(filePath, { force: true });
         await rename(archivePath, filePath);
         return { filePath, fileName };
       } finally {
@@ -104,22 +129,56 @@ export function createBackupService({
       const rollbackDatabasePath = path.join(backupsRoot, `rollback-${operationId}.db`);
       const rollbackUploadsPath = path.join(backupsRoot, `rollback-${operationId}-uploads`);
       const activeUploadsPath = path.join(backupsRoot, `active-${operationId}-uploads`);
-      let rollbackPrepared = false;
-      let replacementStarted = false;
-
+      let rollbackFailed = false;
       try {
         await mkdir(stagingPath, { recursive: false });
         const prepared = await prepareRestore(filePath, stagingPath);
 
         await database.get().backup(rollbackDatabasePath);
         await copyOrdinaryFiles(uploadsRoot, rollbackUploadsPath);
-        rollbackPrepared = true;
 
-        replacementStarted = true;
-        database.replaceFrom(prepared.databasePath);
-        await applyUploads(prepared.uploadsPath, uploadsRoot, backupsRoot, operationId);
+        // 用户批准：换库、图片替换和失败回滚保持在同一同步临界段，避免写入落到待回滚的新库。
+        try {
+          database.replaceFrom(prepared.databasePath);
+          const result = applyUploads(
+            prepared.uploadsPath,
+            uploadsRoot,
+            backupsRoot,
+            operationId,
+          ) as unknown;
+          if (isPromiseLike(result)) {
+            void Promise.resolve(result).catch(() => undefined);
+            throw new Error('图片替换操作必须同步完成');
+          }
+        } catch {
+          const rollbackErrors: unknown[] = [];
+          try {
+            database.replaceFrom(rollbackDatabasePath);
+          } catch (rollbackError) {
+            rollbackErrors.push(rollbackError);
+          }
+          try {
+            restoreUploads(rollbackUploadsPath, uploadsRoot);
+          } catch (rollbackError) {
+            rollbackErrors.push(rollbackError);
+          }
 
-        await cleanupRestorePaths(
+          if (rollbackErrors.length === 0) {
+            await bestEffortCleanup(
+              cleanupPaths,
+              stagingPath,
+              rollbackDatabasePath,
+              rollbackUploadsPath,
+              activeUploadsPath,
+            );
+          } else {
+            rollbackFailed = true;
+          }
+          throw new BackupServiceError('restore_failed');
+        }
+
+        await bestEffortCleanup(
+          cleanupPaths,
           stagingPath,
           rollbackDatabasePath,
           rollbackUploadsPath,
@@ -127,39 +186,16 @@ export function createBackupService({
         );
         return { restored: true };
       } catch (error) {
-        if (!rollbackPrepared) {
-          await cleanupRestorePaths(
-            stagingPath,
-            rollbackDatabasePath,
-            rollbackUploadsPath,
-            activeUploadsPath,
-          );
-          if (error instanceof BackupServiceError) throw error;
-          throw new BackupServiceError('restore_failed');
-        }
-
-        const rollbackErrors: unknown[] = [];
-        if (replacementStarted) {
-          try {
-            database.replaceFrom(rollbackDatabasePath);
-          } catch (rollbackError) {
-            rollbackErrors.push(rollbackError);
-          }
-        }
-        try {
-          await restoreUploads(rollbackUploadsPath, uploadsRoot);
-        } catch (rollbackError) {
-          rollbackErrors.push(rollbackError);
-        }
-
-        if (rollbackErrors.length === 0) {
-          await cleanupRestorePaths(
+        if (!rollbackFailed) {
+          await bestEffortCleanup(
+            cleanupPaths,
             stagingPath,
             rollbackDatabasePath,
             rollbackUploadsPath,
             activeUploadsPath,
           );
         }
+        if (error instanceof BackupServiceError) throw error;
         throw new BackupServiceError('restore_failed');
       }
     },
@@ -177,25 +213,45 @@ async function writeBackupArchive({
   uploadsRoot: string;
   manifest: Manifest;
 }) {
+  const imageFiles = await listOrdinaryFiles(uploadsRoot, isBackupImageName);
   const output = createWriteStream(archivePath, { flags: 'wx' });
   const archive = archiver('zip', { zlib: { level: 9 } });
+  const inputs = [snapshotPath, ...imageFiles.map(({ absolutePath }) => absolutePath)].map(
+    (filePath) => createReadStream(filePath),
+  );
   const completed = new Promise<void>((resolve, reject) => {
     output.on('close', resolve);
     output.on('error', reject);
     archive.on('error', reject);
+    archive.on('warning', reject);
   });
-  archive.pipe(output);
-  archive.append(JSON.stringify(manifest), { name: 'manifest.json' });
-  archive.file(snapshotPath, { name: 'gongkao.db' });
-  for (const file of await listOrdinaryFiles(uploadsRoot)) {
-    archive.file(file.absolutePath, { name: `uploads/${file.relativePath}` });
+
+  try {
+    archive.pipe(output);
+    archive.append(JSON.stringify(manifest), { name: 'manifest.json' });
+    archive.append(inputs[0], { name: 'gongkao.db' });
+    imageFiles.forEach((file, index) => {
+      archive.append(inputs[index + 1], { name: `uploads/${file.relativePath}` });
+    });
+    await Promise.all([archive.finalize(), completed]);
+  } catch (error) {
+    archive.abort();
+    throw error;
+  } finally {
+    inputs.forEach((input) => input.destroy());
+    output.destroy();
+    archive.destroy();
+    await Promise.allSettled([
+      finished(output),
+      finished(archive),
+      ...inputs.map((input) => finished(input)),
+    ]);
   }
-  await archive.finalize();
-  await completed;
 }
 
 async function listOrdinaryFiles(
   directory: string,
+  include: (fileName: string) => boolean = () => true,
 ): Promise<Array<{ absolutePath: string; relativePath: string }>> {
   let entries;
   try {
@@ -207,7 +263,7 @@ async function listOrdinaryFiles(
 
   const files: Array<{ absolutePath: string; relativePath: string }> = [];
   for (const entry of entries) {
-    if (entry.isFile()) {
+    if (entry.isFile() && include(entry.name)) {
       files.push({
         absolutePath: path.join(directory, entry.name),
         relativePath: entry.name,
@@ -215,6 +271,10 @@ async function listOrdinaryFiles(
     }
   }
   return files;
+}
+
+function isBackupImageName(fileName: string) {
+  return !fileName.startsWith('.') && allowedImageExtensions.has(path.extname(fileName).toLowerCase());
 }
 
 async function prepareRestore(filePath: string, stagingPath: string): Promise<PreparedRestore> {
@@ -240,24 +300,48 @@ async function inspectCentralDirectory(filePath: string) {
     throw new BackupServiceError('invalid_backup');
   }
 
-  const expected = new Map<string, 'File' | 'Directory'>();
+  const expected = new Map<string, ExpectedZipEntry>();
   let totalBytes = 0;
   for (const entry of directory.files) {
     const entryPath = validateEntryPath(entry.path, entry.type);
     validateCentralEntryType(entry);
+    validateDeclaredSize(entryPath, entry.type, entry.uncompressedSize);
     const key = entryPath.toLowerCase();
     if (expected.has(key)) throw new BackupServiceError('invalid_backup');
-    expected.set(key, entry.type);
+    expected.set(key, {
+      type: entry.type,
+      uncompressedSize: entry.uncompressedSize,
+      flags: entry.flags,
+      compressionMethod: entry.compressionMethod,
+    });
     totalBytes += entry.uncompressedSize;
     if (!Number.isSafeInteger(totalBytes) || totalBytes > maximumUncompressedBytes) {
       throw new BackupServiceError('invalid_backup');
     }
   }
 
-  if (expected.get('manifest.json') !== 'File' || expected.get('gongkao.db') !== 'File') {
+  if (
+    expected.get('manifest.json')?.type !== 'File' ||
+    expected.get('gongkao.db')?.type !== 'File'
+  ) {
     throw new BackupServiceError('invalid_backup');
   }
   return expected;
+}
+
+function validateDeclaredSize(entryPath: string, type: string, size: number) {
+  if (!Number.isSafeInteger(size) || size < 0) {
+    throw new BackupServiceError('invalid_backup');
+  }
+  if (type === 'Directory' && size !== 0) {
+    throw new BackupServiceError('invalid_backup');
+  }
+  if (entryPath === 'manifest.json' && size > maximumManifestBytes) {
+    throw new BackupServiceError('invalid_backup');
+  }
+  if (entryPath.startsWith('uploads/') && size > maximumImageBytes) {
+    throw new BackupServiceError('invalid_backup');
+  }
 }
 
 function validateCentralEntryType(entry: ZipFile) {
@@ -300,7 +384,10 @@ function validateEntryPath(entryPath: string, type: string) {
   const isRootFile = normalized === 'manifest.json' || normalized === 'gongkao.db';
   const isUploadsDirectory = normalized === 'uploads' && type === 'Directory';
   const isUploadFile =
-    type === 'File' && segments.length === 2 && segments[0] === 'uploads' && segments[1].length > 0;
+    type === 'File' &&
+    segments.length === 2 &&
+    segments[0] === 'uploads' &&
+    isBackupImageName(segments[1]);
   if (!isRootFile && !isUploadsDirectory && !isUploadFile) {
     throw new BackupServiceError('invalid_backup');
   }
@@ -313,17 +400,26 @@ function validateEntryPath(entryPath: string, type: string) {
 async function extractValidatedEntries(
   filePath: string,
   stagingPath: string,
-  expectedEntries: Map<string, 'File' | 'Directory'>,
+  expectedEntries: Map<string, ExpectedZipEntry>,
 ) {
   const parsedEntries = new Set<string>();
-  const parser = createReadStream(filePath).pipe(unzipper.Parse({ forceStream: true }));
+  const actualTotal = { bytes: 0 };
+  const input = createReadStream(filePath);
+  const parser = unzipper.Parse({ forceStream: true });
+  input.pipe(parser);
 
   try {
     for await (const entry of parser as AsyncIterable<Entry>) {
       const entryPath = validateEntryPath(entry.path, entry.type);
       const key = entryPath.toLowerCase();
-      const expectedType = expectedEntries.get(key);
-      if (!expectedType || expectedType !== entry.type || parsedEntries.has(key)) {
+      const expected = expectedEntries.get(key);
+      if (
+        !expected ||
+        expected.type !== entry.type ||
+        expected.flags !== entry.vars.flags ||
+        expected.compressionMethod !== entry.vars.compressionMethod ||
+        parsedEntries.has(key)
+      ) {
         await entry.autodrain().promise();
         throw new BackupServiceError('invalid_backup');
       }
@@ -339,17 +435,44 @@ async function extractValidatedEntries(
         await entry.autodrain().promise();
       } else {
         await mkdir(path.dirname(target), { recursive: true });
-        await pipeline(entry, createWriteStream(target, { flags: 'wx' }));
+        const counter = createByteCounter(expected.uncompressedSize, actualTotal);
+        await pipeline(entry, counter.stream, createWriteStream(target, { flags: 'wx' }));
+        if (counter.bytes() !== expected.uncompressedSize) {
+          throw new BackupServiceError('invalid_backup');
+        }
       }
     }
-  } catch (error) {
+  } finally {
+    input.unpipe(parser);
+    input.destroy();
     parser.destroy();
-    throw error;
+    await Promise.allSettled([finished(input), finished(parser)]);
   }
 
   if (parsedEntries.size !== expectedEntries.size) {
     throw new BackupServiceError('invalid_backup');
   }
+}
+
+function createByteCounter(declaredBytes: number, actualTotal: { bytes: number }) {
+  let entryBytes = 0;
+  const stream = new Transform({
+    transform(chunk: Buffer, _encoding, callback) {
+      const nextEntryBytes = entryBytes + chunk.length;
+      const nextTotalBytes = actualTotal.bytes + chunk.length;
+      if (
+        nextEntryBytes > declaredBytes ||
+        nextTotalBytes > maximumUncompressedBytes
+      ) {
+        callback(new BackupServiceError('invalid_backup'));
+        return;
+      }
+      entryBytes = nextEntryBytes;
+      actualTotal.bytes = nextTotalBytes;
+      callback(null, chunk);
+    },
+  });
+  return { stream, bytes: () => entryBytes };
 }
 
 function validateManifest(content: string) {
@@ -381,6 +504,8 @@ function validateManifest(content: string) {
 
 function validateApplicationDatabase(filePath: string) {
   let database: Database.Database | undefined;
+  let currentCanonical: Database.Database | undefined;
+  let targetCanonical: Database.Database | undefined;
   try {
     database = new Database(filePath, { readonly: true, fileMustExist: true });
     if (database.pragma('integrity_check', { simple: true }) !== 'ok') {
@@ -389,118 +514,142 @@ function validateApplicationDatabase(filePath: string) {
     if ((database.pragma('foreign_key_check') as unknown[]).length !== 0) {
       throw new BackupServiceError('invalid_backup');
     }
-    validateMigrations(database);
-    validateRequiredSchema(database);
+    currentCanonical = new Database(':memory:');
+    migrate(currentCanonical);
+    const currentVersions = readMigrationVersions(currentCanonical);
+    const candidateVersions = readMigrationVersions(database);
+    validateMigrationSequence(candidateVersions, currentVersions.at(-1));
+
+    const targetVersion = candidateVersions.at(-1)!;
+    if (targetVersion === currentVersions.at(-1)) {
+      targetCanonical = currentCanonical;
+    } else if (targetVersion === 1) {
+      targetCanonical = new Database(':memory:');
+      targetCanonical.exec(
+        readFileSync(
+          path.resolve(process.cwd(), 'server', 'db', 'migrations', '001_initial.sql'),
+          'utf8',
+        ),
+      );
+    } else {
+      throw new BackupServiceError('invalid_backup');
+    }
+    validateSchemaAgainstCanonical(database, targetCanonical);
   } catch (error) {
     if (error instanceof BackupServiceError) throw error;
     throw new BackupServiceError('invalid_backup');
   } finally {
     database?.close();
+    if (targetCanonical !== currentCanonical) targetCanonical?.close();
+    currentCanonical?.close();
   }
 }
 
-function validateMigrations(database: Database.Database) {
-  const migrations = database
+function readMigrationVersions(database: Database.Database) {
+  const rows = database
     .prepare('SELECT version FROM schema_migrations ORDER BY version')
     .all() as Array<{ version: number }>;
-  if (migrations.length === 0 || migrations.length > currentDatabaseVersion) {
+  return rows.map(({ version }) => version);
+}
+
+function validateMigrationSequence(versions: number[], currentVersion: number | undefined) {
+  if (!currentVersion || versions.length === 0 || versions.at(-1)! > currentVersion) {
     throw new BackupServiceError('invalid_backup');
   }
-  migrations.forEach(({ version }, index) => {
-    if (version !== index + 1 || version > currentDatabaseVersion) {
+  versions.forEach((version, index) => {
+    if (version !== index + 1) {
       throw new BackupServiceError('invalid_backup');
     }
   });
 }
 
-function validateRequiredSchema(database: Database.Database) {
-  const requiredColumns: Record<string, string[]> = {
-    schema_migrations: ['version', 'applied_at'],
-    categories: ['id', 'parent_id', 'name', 'sort_order'],
-    cards: [
-      'id',
-      'entry_mode',
-      'raw_input',
-      'raw_content_json',
-      'normalized_statement',
-      'wrong_point',
-      'analysis',
-      'mnemonic',
-      'extension',
-      'notes',
-      'source_type',
-      'source_detail',
-      'rating',
-      'mastery',
-      'wrong_count',
-      'ai_status',
-      'ai_attempt_count',
-      'ai_error_code',
-      'archived',
-      'created_at',
-      'updated_at',
-    ],
-    card_categories: ['card_id', 'category_id'],
-    tags: ['id', 'name'],
-    card_tags: ['card_id', 'tag_id', 'origin'],
-    attachments: [
-      'id',
-      'card_id',
-      'stored_name',
-      'original_name',
-      'mime_type',
-      'byte_size',
-      'sort_order',
-      'created_at',
-    ],
-    quiz_items: [
-      'id',
-      'card_id',
-      'direction',
-      'question',
-      'answer',
-      'mastery',
-      'due_at',
-      'stability',
-      'difficulty',
-      'elapsed_days',
-      'scheduled_days',
-      'learning_steps',
-      'reps',
-      'lapses',
-      'state',
-      'last_review_at',
-      'created_at',
-    ],
-    review_logs: [
-      'id',
-      'quiz_item_id',
-      'card_id',
-      'rating',
-      'previous_due_at',
-      'next_due_at',
-      'reviewed_at',
-    ],
-    app_settings: ['key', 'value_json'],
-  };
-  for (const [table, columns] of Object.entries(requiredColumns)) {
-    const existing = new Set(
-      (database.pragma(`table_info(${table})`) as Array<{ name: string }>).map(({ name }) => name),
-    );
-    if (columns.some((column) => !existing.has(column))) {
-      throw new BackupServiceError('invalid_backup');
-    }
+function validateSchemaAgainstCanonical(
+  database: Database.Database,
+  canonical: Database.Database,
+) {
+  const specialObjects = (item: Database.Database) =>
+    item
+      .prepare(
+        "SELECT type, name FROM sqlite_master WHERE type IN ('view', 'trigger') ORDER BY type, name",
+      )
+      .all();
+  if (JSON.stringify(specialObjects(database)) !== JSON.stringify(specialObjects(canonical))) {
+    throw new BackupServiceError('invalid_backup');
   }
 
-  const latestMigration = database
-    .prepare('SELECT MAX(version) AS version FROM schema_migrations')
-    .get() as { version: number };
-  if (latestMigration.version >= 2) {
-    const cardColumns = database.pragma('table_info(cards)') as Array<{ name: string }>;
-    if (!cardColumns.some(({ name }) => name === 'template')) {
+  const tables = canonical
+    .prepare(
+      "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name",
+    )
+    .all() as Array<{ name: string }>;
+  for (const { name } of tables) {
+    const object = database
+      .prepare('SELECT type FROM sqlite_master WHERE name = ?')
+      .get(name) as { type: string } | undefined;
+    if (object?.type !== 'table') {
+      throw new BackupServiceError('invalid_backup');
+    }
+    if (
+      JSON.stringify(readTableInfo(database, name)) !==
+        JSON.stringify(readTableInfo(canonical, name)) ||
+      JSON.stringify(readForeignKeys(database, name)) !==
+        JSON.stringify(readForeignKeys(canonical, name)) ||
+      JSON.stringify(readUniqueIndexes(database, name)) !==
+        JSON.stringify(readUniqueIndexes(canonical, name))
+    ) {
       throw new BackupServiceError('invalid_backup');
     }
   }
+}
+
+function readTableInfo(database: Database.Database, table: string) {
+  return (
+    database.pragma(`table_info(${quoteIdentifier(table)})`) as Array<{
+      name: string;
+      type: string;
+      notnull: number;
+      dflt_value: string | null;
+      pk: number;
+    }>
+  ).map(({ name, type, notnull, dflt_value, pk }) => ({
+    name,
+    type,
+    notnull,
+    dflt_value,
+    pk,
+  }));
+}
+
+function readForeignKeys(database: Database.Database, table: string) {
+  return database.pragma(`foreign_key_list(${quoteIdentifier(table)})`);
+}
+
+function readUniqueIndexes(database: Database.Database, table: string) {
+  const indexes = database.pragma(`index_list(${quoteIdentifier(table)})`) as Array<{
+    name: string;
+    unique: number;
+    origin: string;
+    partial: number;
+  }>;
+  return indexes
+    .filter(({ unique }) => unique === 1)
+    .map(({ name, origin, partial }) => ({
+      origin,
+      partial,
+      columns: (
+        database.pragma(`index_info(${quoteIdentifier(name)})`) as Array<{
+          seqno: number;
+          name: string;
+        }>
+      )
+        .sort((left, right) => left.seqno - right.seqno)
+        .map(({ name: column }) => column),
+    }))
+    .sort((left, right) => JSON.stringify(left).localeCompare(JSON.stringify(right)));
+}
+
+function quoteIdentifier(value: string) {
+  return `"${value.replaceAll('"', '""')}"`;
 }
 
 async function copyOrdinaryFiles(source: string, destination: string) {
@@ -512,7 +661,7 @@ async function copyOrdinaryFiles(source: string, destination: string) {
   }
 }
 
-async function replaceUploads(
+function replaceUploads(
   incomingUploads: string,
   uploadsRoot: string,
   backupsRoot: string,
@@ -521,17 +670,17 @@ async function replaceUploads(
   const heldUploads = path.join(backupsRoot, `active-${operationId}-uploads`);
   let held = false;
   try {
-    if (await pathExists(uploadsRoot)) {
-      await rename(uploadsRoot, heldUploads);
+    if (existsSync(uploadsRoot)) {
+      renameSync(uploadsRoot, heldUploads);
       held = true;
     }
-    await mkdir(path.dirname(uploadsRoot), { recursive: true });
-    await rename(incomingUploads, uploadsRoot);
-    await rm(heldUploads, { recursive: true, force: true });
+    mkdirSync(path.dirname(uploadsRoot), { recursive: true });
+    renameSync(incomingUploads, uploadsRoot);
+    rmSync(heldUploads, { recursive: true, force: true });
   } catch (error) {
-    if (held && !(await pathExists(uploadsRoot))) {
+    if (held && !existsSync(uploadsRoot)) {
       try {
-        await rename(heldUploads, uploadsRoot);
+        renameSync(heldUploads, uploadsRoot);
       } catch {
         // 外层会使用独立图片回滚点再次恢复。
       }
@@ -540,22 +689,41 @@ async function replaceUploads(
   }
 }
 
-async function restoreUploads(rollbackUploads: string, uploadsRoot: string) {
-  await rm(uploadsRoot, { recursive: true, force: true });
-  await copyOrdinaryFiles(rollbackUploads, uploadsRoot);
+function restoreUploads(rollbackUploads: string, uploadsRoot: string) {
+  const rollbackStat = statSync(rollbackUploads);
+  if (!rollbackStat.isDirectory()) throw new Error('图片回滚点无效');
+  const rollbackFiles = readdirSync(rollbackUploads, { withFileTypes: true }).filter((entry) =>
+    entry.isFile(),
+  );
+
+  rmSync(uploadsRoot, { recursive: true, force: true });
+  mkdirSync(uploadsRoot, { recursive: true });
+  for (const entry of rollbackFiles) {
+    copyFileSync(path.join(rollbackUploads, entry.name), path.join(uploadsRoot, entry.name));
+  }
 }
 
 async function cleanupRestorePaths(...paths: string[]) {
   await Promise.all(paths.map((item) => rm(item, { recursive: true, force: true })));
 }
 
-async function pathExists(filePath: string) {
+async function bestEffortCleanup(
+  cleanup: (...paths: string[]) => Promise<void>,
+  ...paths: string[]
+) {
   try {
-    await access(filePath);
-    return true;
+    await cleanup(...paths);
   } catch {
-    return false;
+    // 清理失败不改变已经确定的恢复业务结果。
   }
+}
+
+function isPromiseLike(value: unknown): value is PromiseLike<unknown> {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    typeof Reflect.get(value, 'then') === 'function'
+  );
 }
 
 function formatTimestamp(value: Date) {
