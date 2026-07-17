@@ -246,36 +246,6 @@
 - `progress.md`：仅在文件末尾追加本轮实现、验证证据、改动文件清单和回滚方式。
 - 回滚方式：在本任务提交仍为当前 `HEAD` 时执行 `git revert --no-edit HEAD`。
 
-## 2026-07-17 - Task: 修正桌面外壳空响应与折叠语义
-
-### What was done
-
-- 统一 API 客户端增加共享成功响应解析，JSON 请求与表单请求收到 204 时直接返回 `undefined`，不再尝试解析空响应体；其他成功响应仍按 JSON 解析。
-- 侧栏增加稳定标识，折叠按钮通过 `aria-controls` 和 `aria-expanded` 暴露控制对象与当前状态；鼠标或键盘触发折叠后按钮继续保持焦点。
-- 品牌区增加固定 32×32 像素的 Lucide 书本图标，展开时与产品名共同显示，折叠到 64 像素后只隐藏文字并保留图标，避免品牌区域空白。
-- 更新本地运行文档，明确侧栏折叠后仍保留品牌书本图标。
-
-### Testing
-
-- TDD 红灯：`npx vitest run tests/frontend/app-shell.test.tsx` 共十六项，十三项通过、三项失败；失败分别命中按钮缺少 `aria-expanded`、品牌图标不存在和 204 空响应仍调用 `json()` 后抛出语法错误。
-- 定向测试：`npx vitest run tests/frontend/app-shell.test.tsx tests/frontend/app.test.tsx` 通过，两个测试文件共十七项全部通过，覆盖 204 JSON 与表单响应、侧栏 ARIA 关联、折叠焦点和品牌图标持久显示。
-- `npm test`：通过，十四个测试文件共二百二十九项全部通过，未访问真实网络。
-- `npm run typecheck`：通过，前端与服务端 TypeScript 配置均无类型错误。
-- `npm run build`：通过，前端与服务端构建成功；前端入口脚本为 191.51 KB，服务端产物为 107.20 KB。
-- 浏览器验证：1440×900 展开态侧栏为 168 像素，品牌图标为 32×32 像素，按钮 `aria-expanded=true` 且正确关联侧栏；1024×768 下使用 Tab 到达折叠按钮并按 Enter 后，侧栏为 64 像素，按钮继续保持焦点且 `aria-expanded=false`，品牌图标仍为 32×32 像素而文字隐藏。两个视口均无页面或元素横向溢出，控制台错误和页面错误均为零。
-- 图片目检：在系统临时目录生成 1440 展开态和 1024 折叠态截图并使用图片查看工具检查，品牌、导航、标题、状态行和焦点框均无重叠或裁切；截图不进入仓库。
-- `git diff --check`：通过，仅输出既有 Windows 工作区的 LF/CRLF 转换提示。
-
-### Notes
-
-- `src/api/client.ts`：共享成功响应解析并安全处理 204 空响应。
-- `src/components/AppShell.tsx`：增加侧栏标识、按钮 ARIA 状态和常驻品牌书本图标。
-- `src/styles/global.css`：增加 32×32 像素品牌图标样式并保持 6 像素圆角。
-- `tests/frontend/app-shell.test.tsx`：新增 204、折叠语义、键盘焦点和品牌图标回归断言。
-- `docs/本地运行与数据管理.md`：补充折叠后保留品牌书本图标的使用说明。
-- `progress.md`：仅在文件末尾追加本轮审查修复、验证证据、改动文件清单和回滚方式。
-- 回滚方式：在本修复提交仍为当前 `HEAD` 时执行 `git revert --no-edit HEAD`。
-
 ## 2026-07-17 - Task: 保证数据库替换原子可恢复
 
 ### What was done
@@ -847,3 +817,33 @@
 - `docs/本地运行与数据管理.md`：补充六个页面地址、桌面范围和侧栏折叠说明。
 - `progress.md`：仅在文件末尾追加本轮实现、验证证据、改动文件清单和回滚方式。
 - 回滚方式：在本任务提交仍为当前 `HEAD` 时执行 `git revert --no-edit HEAD`。
+
+## 2026-07-17 - Task: 修正桌面外壳空响应与折叠语义
+
+### What was done
+
+- 统一 API 客户端增加共享成功响应解析，JSON 请求与表单请求收到 204 时直接返回 `undefined`，不再尝试解析空响应体；其他成功响应仍按 JSON 解析。
+- 侧栏增加稳定标识，折叠按钮通过 `aria-controls` 和 `aria-expanded` 暴露控制对象与当前状态；鼠标或键盘触发折叠后按钮继续保持焦点。
+- 品牌区增加固定 32×32 像素的 Lucide 书本图标，展开时与产品名共同显示，折叠到 64 像素后只隐藏文字并保留图标，避免品牌区域空白。
+- 更新本地运行文档，明确侧栏折叠后仍保留品牌书本图标。
+
+### Testing
+
+- TDD 红灯：`npx vitest run tests/frontend/app-shell.test.tsx` 共十六项，十三项通过、三项失败；失败分别命中按钮缺少 `aria-expanded`、品牌图标不存在和 204 空响应仍调用 `json()` 后抛出语法错误。
+- 定向测试：`npx vitest run tests/frontend/app-shell.test.tsx tests/frontend/app.test.tsx` 通过，两个测试文件共十七项全部通过，覆盖 204 JSON 与表单响应、侧栏 ARIA 关联、折叠焦点和品牌图标持久显示。
+- `npm test`：通过，十四个测试文件共二百二十九项全部通过，未访问真实网络。
+- `npm run typecheck`：通过，前端与服务端 TypeScript 配置均无类型错误。
+- `npm run build`：通过，前端与服务端构建成功；前端入口脚本为 191.51 KB，服务端产物为 107.20 KB。
+- 浏览器验证：1440×900 展开态侧栏为 168 像素，品牌图标为 32×32 像素，按钮 `aria-expanded=true` 且正确关联侧栏；1024×768 下使用 Tab 到达折叠按钮并按 Enter 后，侧栏为 64 像素，按钮继续保持焦点且 `aria-expanded=false`，品牌图标仍为 32×32 像素而文字隐藏。两个视口均无页面或元素横向溢出，控制台错误和页面错误均为零。
+- 图片目检：在系统临时目录生成 1440 展开态和 1024 折叠态截图并使用图片查看工具检查，品牌、导航、标题、状态行和焦点框均无重叠或裁切；截图不进入仓库。
+- `git diff --check`：通过，仅输出既有 Windows 工作区的 LF/CRLF 转换提示。
+
+### Notes
+
+- `src/api/client.ts`：共享成功响应解析并安全处理 204 空响应。
+- `src/components/AppShell.tsx`：增加侧栏标识、按钮 ARIA 状态和常驻品牌书本图标。
+- `src/styles/global.css`：增加 32×32 像素品牌图标样式并保持 6 像素圆角。
+- `tests/frontend/app-shell.test.tsx`：新增 204、折叠语义、键盘焦点和品牌图标回归断言。
+- `docs/本地运行与数据管理.md`：补充折叠后保留品牌书本图标的使用说明。
+- `progress.md`：仅在文件末尾追加本轮审查修复、验证证据、改动文件清单和回滚方式。
+- 回滚方式：在本修复提交仍为当前 `HEAD` 时执行 `git revert --no-edit HEAD`。
