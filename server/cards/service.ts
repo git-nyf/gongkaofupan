@@ -69,6 +69,16 @@ export function createCardService({
     return repository.getDetail(cardId);
   }
 
+  const retryAi = async (cardId: string) => {
+    let work: RetryWork;
+    try {
+      work = repository.beginRetryInTransaction(cardId, now().toISOString());
+    } catch (error) {
+      throw mapRepositoryError(error);
+    }
+    return normalizeAndComplete(cardId, work);
+  };
+
   return {
     async create(createInput) {
       const prepared = prepareCreateInput(createInput);
@@ -85,15 +95,7 @@ export function createCardService({
       });
     },
 
-    async retryAi(cardId) {
-      let work: RetryWork;
-      try {
-        work = repository.beginRetryInTransaction(cardId, now().toISOString());
-      } catch (error) {
-        throw mapRepositoryError(error);
-      }
-      return normalizeAndComplete(cardId, work);
-    },
+    retryAi,
 
     recoverStaleProcessing(recoveryNow) {
       return repository.recoverStaleProcessing(recoveryNow);
@@ -107,7 +109,7 @@ export function createCardService({
 
       for (const cardId of cardIds) {
         try {
-          const detail = await this.retryAi(cardId);
+          const detail = await retryAi(cardId);
           if (detail.aiStatus === 'ready') ready += 1;
           else stillPending += 1;
         } catch {
@@ -157,7 +159,14 @@ function toSafeAiErrorCode(error: unknown) {
     typeof error === 'object' && error !== null && typeof Reflect.get(error, 'code') === 'string'
       ? String(Reflect.get(error, 'code'))
       : '';
-  return ['timeout', 'http_error', 'empty_response', 'invalid_json', 'invalid_schema'].includes(code)
+  return [
+    'not_configured',
+    'timeout',
+    'http_error',
+    'empty_response',
+    'invalid_json',
+    'invalid_schema',
+  ].includes(code)
     ? code
     : 'ai_error';
 }

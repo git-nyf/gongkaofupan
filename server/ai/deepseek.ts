@@ -4,6 +4,7 @@ import type { AiProvider } from './provider';
 import { normalizedCardSchema } from './schema';
 
 export type DeepSeekErrorCode =
+  | 'not_configured'
   | 'timeout'
   | 'http_error'
   | 'empty_response'
@@ -35,6 +36,10 @@ export class DeepSeekAiProvider implements AiProvider {
   ) {}
 
   async normalize(input: NormalizeCardInput): Promise<NormalizedCard> {
+    if (!hasConfiguredDeepSeekApiKey(this.config.apiKey)) {
+      throw new DeepSeekError('not_configured');
+    }
+
     for (let attempt = 0; attempt < 2; attempt += 1) {
       try {
         return await this.request(input);
@@ -123,6 +128,10 @@ export function createDeepSeekProvider(
   fetchImpl: typeof fetch = globalThis.fetch,
 ): AiProvider {
   return new DeepSeekAiProvider(config, fetchImpl);
+}
+
+export function hasConfiguredDeepSeekApiKey(apiKey: string) {
+  return apiKey.trim().length > 0;
 }
 
 function readContent(responseBody: unknown): string | null {

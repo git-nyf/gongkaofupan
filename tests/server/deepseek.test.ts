@@ -97,6 +97,18 @@ describe('DeepSeek 系统提示词', () => {
 });
 
 describe('DeepSeek 请求', () => {
+  it.each(['', '   '])('API Key 为“%s”时立即返回未配置且不发起请求', async (blankApiKey) => {
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(apiResponse(JSON.stringify(normalizedCard)));
+    const provider = createDeepSeekProvider({ ...config, apiKey: blankApiKey }, fetchMock);
+
+    const error = await provider.normalize(input).catch((caught: unknown) => caught);
+
+    expect(error).toBeInstanceOf(DeepSeekError);
+    expect(error).toMatchObject({ code: 'not_configured' });
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(errorText(error)).not.toContain(config.baseUrl);
+  });
+
   it('发送固定模型、关闭思考、要求 JSON，并隔离 system 与用户 JSON 数据', async () => {
     const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(apiResponse(JSON.stringify(normalizedCard)));
     const timeoutSpy = vi.spyOn(AbortSignal, 'timeout');

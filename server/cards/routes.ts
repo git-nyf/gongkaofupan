@@ -57,7 +57,8 @@ export function createCardRouter(cardService: CardService) {
   });
 
   router.post('/:id/retry-ai', async (request, response) => {
-    if (!retryBodySchema.safeParse(request.body ?? {}).success) {
+    const body = request.body === undefined ? {} : request.body;
+    if (!retryBodySchema.safeParse(body).success) {
       response.status(400).json({ code: 'invalid_request', message: '请求参数不合法' });
       return;
     }

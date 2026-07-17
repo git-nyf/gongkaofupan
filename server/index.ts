@@ -2,7 +2,7 @@ import 'dotenv/config';
 import { mkdirSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { createApp } from './app';
-import { createDeepSeekProvider } from './ai/deepseek';
+import { createDeepSeekProvider, hasConfiguredDeepSeekApiKey } from './ai/deepseek';
 import { createCardService } from './cards/service';
 import { readConfig } from './config';
 import { createDatabaseManager } from './db/database';
@@ -24,7 +24,9 @@ const app = createApp({ cardService });
 
 app.listen(config.port, '127.0.0.1', () => {
   console.log(`Server listening on http://127.0.0.1:${config.port}`);
-  void cardService.retryPendingBatch(20).catch(() => {
-    console.error('启动后的待整理卡片重试失败');
-  });
+  if (hasConfiguredDeepSeekApiKey(config.deepseek.apiKey)) {
+    void cardService.retryPendingBatch(20).catch(() => {
+      console.error('启动后的待整理卡片重试失败');
+    });
+  }
 });

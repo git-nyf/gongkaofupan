@@ -425,3 +425,37 @@
 - `docs/本地运行与数据管理.md`：补充模板保存、AI 状态、启动恢复、批量重试和 002 自动升级说明。
 - `progress.md`：仅在文件末尾追加本轮实现、验证证据、改动文件清单和回滚方式。
 - 回滚方式：在本任务提交仍为当前 `HEAD` 时执行 `git revert --no-edit HEAD`。
+
+## 2026-07-17 - Task: 修正卡片离线配置与重试边界
+
+### What was done
+
+- DeepSeek 密钥为空或只有空白时立即返回稳定的 `not_configured`，不发起网络请求且不进入重试；卡片仍先保存到本地并保持 `pending`。
+- 服务启动入口复用同一密钥判定，未配置密钥时跳过待整理卡片批量重试，避免无意义增加 AI 尝试次数。
+- 批量重试改为调用闭包中的单卡重试函数，解构 `retryPendingBatch` 后仍能正常处理卡片；重试路由不再把显式 JSON `null` 当作空对象。
+- 纠正上一轮验证记录的表述口径：`git diff --check` 只证明空白格式，本轮另行执行文件范围核对和明确密钥模式扫描。
+
+### Testing
+
+- TDD 红灯：先补离线配置、错误码保留、解构批量调用和 JSON `null` 四类测试，运行 `npx vitest run tests/server/deepseek.test.ts tests/server/card-create.test.ts`，四十四条中五条按预期失败；空白密钥两例仍调用 fetch，服务保存 `ai_error`，解构调用返回 `ready=0`，JSON `null` 返回 200。
+- TDD 绿灯：最小修复后再次运行同一命令，DeepSeek 十八条与卡片二十六条共四十四条全部通过，注入 fetch 调用数为零。
+- `npx vitest run tests/server/database.test.ts tests/server/card-create.test.ts tests/server/deepseek.test.ts`：通过，三份服务端专项共五十六条测试全部通过。
+- `npm test`：通过，六个测试文件共九十条测试全部通过，未调用真实网络。
+- `npm run typecheck`：通过，前端与服务端 TypeScript 配置均无类型错误。
+- `npm run build`：通过，成功生成前端与服务端构建产物。
+- 提交前 `git diff --name-only a1b066b` 范围核对列出十四个文件，均属于任务 4 原授权范围或本轮额外批准的 DeepSeek 文件；未出现其他模块。
+- 首次提交后执行 `git diff --name-only a1b066b..HEAD`，同样只列出上述十四个任务 4 文件，确认完整提交范围没有越界。
+- `git diff --check HEAD~1..HEAD`：通过；该命令仅用于确认提交差异不存在空白格式错误，不作为范围或密钥检查证据。
+- 使用 PowerShell `Select-String` 对 `server`、`shared`、`tests`、`docs`、`progress.md` 和 `.env.example` 共三十个文件扫描 `sk-[A-Za-z0-9]{20,}`，结果为零条匹配。
+
+### Notes
+
+- `server/ai/deepseek.ts`：新增 `not_configured` 错误码和空白密钥判定，在任何 fetch 或重试前失败。
+- `tests/server/deepseek.test.ts`：新增空密钥与纯空白密钥不触网的参数化测试。
+- `server/cards/service.ts`：保留 `not_configured` 补偿错误码，并消除批量重试对方法接收者 `this` 的依赖。
+- `server/cards/routes.ts`：只把未定义请求体视为空对象，显式 JSON `null` 继续交由严格对象校验拒绝。
+- `server/index.ts`：未配置 DeepSeek 密钥时跳过启动后的待整理卡片批量重试。
+- `tests/server/card-create.test.ts`：新增离线错误码、解构批量调用和 JSON `null` 路由回归测试。
+- `docs/本地运行与数据管理.md`：补充无密钥时本地保存、不触网、不启动批量重试及配置后重试说明。
+- `progress.md`：仅在文件末尾追加本轮修正、验证证据、改动文件清单和回滚方式。
+- 回滚方式：在本任务提交仍为当前 `HEAD` 时执行 `git revert --no-edit HEAD`。

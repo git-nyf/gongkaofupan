@@ -1,7 +1,9 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import express from 'express';
 import request from 'supertest';
 import type { AiProvider } from '../../server/ai/provider';
 import { createApp } from '../../server/app';
+import { createCardRouter } from '../../server/cards/routes';
 import { createCardService } from '../../server/cards/service';
 import type {
   CreateCardInput,
@@ -197,6 +199,18 @@ describe('卡片自动整理服务', () => {
     expect(stored).toEqual({ raw_input: '广陵=扬州', ai_status: 'pending', ai_error_code: 'ai_error' });
     expect(JSON.stringify(stored)).not.toContain('secret');
     expect(JSON.stringify(stored)).not.toContain('SQL');
+  });
+
+  it('AI 未配置时保留原文并保存明确的 not_configured 错误码', async () => {
+    const error = Object.assign(new Error('本机未配置密钥'), { code: 'not_configured' });
+    const { database, service } = setup([error]);
+
+    const detail = await service.create(input());
+
+    expect(detail.aiStatus).toBe('pending');
+    expect(database.db.prepare('SELECT ai_error_code FROM cards WHERE id = ?').get(detail.id)).toEqual({
+      ai_error_code: 'not_configured',
+    });
   });
 
   it('AI 无安全题面时标记为 needs_input 且不写题面', async () => {
@@ -417,6 +431,20 @@ describe('卡片自动整理服务', () => {
       count: 3,
     });
   });
+
+  it('解构 retryPendingBatch 后仍执行实际重试', async () => {
+    const { database, service } = setup([normalized()]);
+    insertCard(database, 'detached-1', 'pending', now.toISOString());
+    insertCard(database, 'detached-2', 'pending', now.toISOString());
+    const { retryPendingBatch } = service;
+
+    const result = await retryPendingBatch(2);
+
+    expect(result).toEqual({ attempted: 2, ready: 2, stillPending: 0 });
+    expect(database.db.prepare("SELECT COUNT(*) AS count FROM cards WHERE ai_status = 'ready'").get()).toEqual({
+      count: 2,
+    });
+  });
 });
 
 describe('卡片创建与重试接口', () => {
@@ -434,7 +462,7 @@ describe('卡片创建与重试接口', () => {
       aiProvider: sequencedProvider(results),
       now: () => new Date(now),
     });
-    return { database, app: createApp({ cardService: service }) };
+    return { database, service, app: createApp({ cardService: service }) };
   }
 
   it('通过接口创建 pending 卡片并重试到 ready', async () => {
@@ -501,6 +529,25 @@ describe('卡片创建与重试接口', () => {
     expect(notFound.body).toEqual({ code: 'not_found', message: '卡片不存在' });
     expect(extraBody.status).toBe(400);
     expect(extraBody.body).toEqual({ code: 'invalid_request', message: '请求参数不合法' });
+  });
+
+  it('重试接口拒绝显式 JSON null 请求体', async () => {
+    const { database, service } = setup([new Error('等待重试'), normalized()]);
+    const pending = await service.create(input());
+    const app = express();
+    app.use(express.json({ strict: false }));
+    app.use('/api/cards', createCardRouter(service));
+
+    const response = await request(app)
+      .post(`/api/cards/${pending.id}/retry-ai`)
+      .set('Content-Type', 'application/json')
+      .send('null');
+
+    expect(response.status).toBe(400);
+    expect(response.body).toEqual({ code: 'invalid_request', message: '请求参数不合法' });
+    expect(database.db.prepare('SELECT ai_attempt_count FROM cards WHERE id = ?').get(pending.id)).toEqual({
+      ai_attempt_count: 1,
+    });
   });
 
   it('内部数据库错误不向 HTTP 响应泄露异常或 SQL', async () => {
