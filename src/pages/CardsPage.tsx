@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Archive,
   ChevronLeft,
@@ -66,6 +66,7 @@ export function CardsPage() {
   const [actionError, setActionError] = useState('');
   const [reloadKey, setReloadKey] = useState(0);
   const requestVersion = useRef(0);
+  const detailTrigger = useRef<HTMLButtonElement | null>(null);
 
   useEffect(() => {
     setQueryDraft(filters.query);
@@ -84,16 +85,18 @@ export function CardsPage() {
     const controller = new AbortController();
     setLoadState('loading');
     setActionError('');
+    setSelected(new Set());
 
     api<CardSearchResult>(buildSearchPath(filters), { signal: controller.signal })
       .then((nextResult) => {
         if (version !== requestVersion.current) return;
+        const maximumPage = Math.max(1, Math.ceil(nextResult.total / filters.pageSize));
+        if (filters.page > maximumPage) {
+          updateSearchParams(setSearchParams, filters, { page: maximumPage });
+          return;
+        }
         setResult(nextResult);
         setLoadState('ready');
-        setSelected((current) => {
-          const visibleIds = new Set(nextResult.items.map(({ id }) => id));
-          return new Set([...current].filter((id) => visibleIds.has(id)));
-        });
       })
       .catch((error: unknown) => {
         if (version !== requestVersion.current || isAbortError(error)) return;
@@ -101,13 +104,24 @@ export function CardsPage() {
       });
 
     return () => controller.abort();
-  }, [filters, reloadKey]);
+  }, [filters, reloadKey, setSearchParams]);
 
   const setFilter = (patch: Partial<FilterState>) => {
     updateSearchParams(setSearchParams, filters, { ...patch, page: patch.page ?? 1 });
   };
 
   const refresh = () => setReloadKey((current) => current + 1);
+
+  const openDetail = (card: CardDetail, trigger: HTMLButtonElement) => {
+    detailTrigger.current = trigger;
+    setDetail(card);
+  };
+
+  const closeDetail = useCallback(() => {
+    setDetail(undefined);
+    detailTrigger.current?.focus();
+    detailTrigger.current = null;
+  }, []);
 
   const runAction = async (name: string, action: () => Promise<unknown>) => {
     if (actionName) return;
@@ -251,7 +265,7 @@ export function CardsPage() {
           cards={result.items}
           onArchive={archiveCard}
           onDelete={deleteCard}
-          onDetail={setDetail}
+          onDetail={openDetail}
           onSelect={(cardId, checked) => setSelected((current) => toggleSet(current, cardId, checked))}
           selected={selected}
         />
@@ -268,7 +282,7 @@ export function CardsPage() {
         >
           <ChevronLeft aria-hidden="true" size={18} />
         </button>
-        <span>第 {filters.page} / {totalPages} 页</span>
+        <span>{loadState === 'loading' ? '加载中' : `第 ${filters.page} / ${totalPages} 页`}</span>
         <button
           aria-label="下一页"
           className="cards-icon-button"
@@ -281,7 +295,7 @@ export function CardsPage() {
         </button>
       </div>
 
-      {detail ? <CardDetailDrawer card={detail} onClose={() => setDetail(undefined)} /> : null}
+      {detail ? <CardDetailDrawer card={detail} onClose={closeDetail} /> : null}
     </section>
   );
 }
@@ -299,7 +313,7 @@ function CardTable({
   cards: CardDetail[];
   onArchive: (cardId: string) => void;
   onDelete: (card: CardDetail) => void;
-  onDetail: (card: CardDetail) => void;
+  onDetail: (card: CardDetail, trigger: HTMLButtonElement) => void;
   onSelect: (cardId: string, selected: boolean) => void;
   selected: Set<string>;
 }) {
@@ -345,7 +359,7 @@ function CardTable({
                 <td>{nextDueText(card)}</td>
                 <td>
                   <div className="cards-row-actions">
-                    <button aria-label={`查看${title}详情`} onClick={() => onDetail(card)} title="查看详情" type="button"><Eye aria-hidden="true" size={16} /></button>
+                    <button aria-label={`查看${title}详情`} onClick={(event) => onDetail(card, event.currentTarget)} title="查看详情" type="button"><Eye aria-hidden="true" size={16} /></button>
                     <Link aria-label={`编辑${title}`} title="编辑" to={`/entry?edit=${encodeURIComponent(card.id)}`}><Pencil aria-hidden="true" size={16} /></Link>
                     <button aria-label={`归档${title}`} disabled={Boolean(actionName)} onClick={() => onArchive(card.id)} title="归档" type="button"><Archive aria-hidden="true" size={16} /></button>
                     <button aria-label={`删除${title}`} disabled={Boolean(actionName)} onClick={() => onDelete(card)} title="删除" type="button"><Trash2 aria-hidden="true" size={16} /></button>
@@ -361,9 +375,52 @@ function CardTable({
 }
 
 function CardDetailDrawer({ card, onClose }: { card: CardDetail; onClose: () => void }) {
+  const dialogRef = useRef<HTMLElement>(null);
+
+  useEffect(() => {
+    const dialog = dialogRef.current;
+    if (!dialog) return;
+
+    const focusableElements = () => Array.from(dialog.querySelectorAll<HTMLElement>(
+      'button:not([disabled]), a[href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
+    ));
+    const initialFocus = focusableElements()[0] ?? dialog;
+    initialFocus.focus();
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        onClose();
+        return;
+      }
+      if (event.key !== 'Tab') return;
+
+      const elements = focusableElements();
+      if (elements.length === 0) {
+        event.preventDefault();
+        dialog.focus();
+        return;
+      }
+
+      const first = elements[0];
+      const last = elements[elements.length - 1];
+      const activeElement = document.activeElement;
+      if (event.shiftKey && (activeElement === first || !dialog.contains(activeElement))) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && (activeElement === last || !dialog.contains(activeElement))) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+
+    document.addEventListener('keydown', handleKeyDown);
+    return () => document.removeEventListener('keydown', handleKeyDown);
+  }, [onClose]);
+
   return (
     <div className="cards-drawer-layer" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
-      <aside aria-label="卡片详情" aria-modal="true" className="cards-drawer" role="dialog">
+      <aside aria-label="卡片详情" aria-modal="true" className="cards-drawer" ref={dialogRef} role="dialog" tabIndex={-1}>
         <header>
           <div>
             <span className={`cards-status cards-status--${card.aiStatus}`}>{aiStatusLabels[card.aiStatus]}</span>
@@ -398,10 +455,30 @@ function DetailField({ label, value }: { label: string; value: string }) {
 }
 
 function FilterTextInput({ label, onChange, placeholder, value }: { label: string; onChange: (value: string) => void; placeholder: string; value: string }) {
+  const [draft, setDraft] = useState(value);
+  const focused = useRef(false);
+
+  useEffect(() => {
+    if (!focused.current) setDraft(value);
+  }, [value]);
+
   return (
     <label className="cards-filter">
       <span>{label}</span>
-      <input aria-label={label} onChange={(event) => onChange(event.target.value)} placeholder={placeholder} value={value} />
+      <input
+        aria-label={label}
+        onBlur={(event) => {
+          focused.current = false;
+          setDraft(splitNames(event.currentTarget.value).join('，'));
+        }}
+        onChange={(event) => {
+          setDraft(event.target.value);
+          onChange(event.target.value);
+        }}
+        onFocus={() => { focused.current = true; }}
+        placeholder={placeholder}
+        value={draft}
+      />
     </label>
   );
 }

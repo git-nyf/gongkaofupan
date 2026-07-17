@@ -177,6 +177,51 @@ describe('卡片库筛选与状态', () => {
     expect(screen.queryByText('过期结果')).not.toBeInTheDocument();
   });
 
+  it('逐字输入多值板块和标签时保留输入草稿并立即写入重复查询键', async () => {
+    const fetchMock = vi.mocked(fetch).mockResolvedValue(jsonResponse(searchResult([])));
+    const user = userEvent.setup();
+    renderAt('/cards');
+    await screen.findByText('暂无符合条件的卡片');
+
+    const tagInput = screen.getByLabelText('标签编号');
+    await user.type(tagInput, 'tag-a,tag-b');
+    expect(tagInput).toHaveValue('tag-a,tag-b');
+    expect(new URLSearchParams(window.location.search).getAll('tagIds')).toEqual(['tag-a', 'tag-b']);
+
+    const categoryInput = screen.getByLabelText('板块编号');
+    await user.type(categoryInput, '常识判断,政治理论');
+    expect(categoryInput).toHaveValue('常识判断,政治理论');
+    const currentParams = new URLSearchParams(window.location.search);
+    expect(currentParams.getAll('categoryIds')).toEqual(['常识判断', '政治理论']);
+    expect(currentParams.getAll('tagIds')).toEqual(['tag-a', 'tag-b']);
+
+    await user.tab();
+    expect(categoryInput).toHaveValue('常识判断，政治理论');
+    const requested = new URL(String(fetchMock.mock.calls.at(-1)?.[0]), 'http://localhost');
+    expect(requested.searchParams.getAll('categoryIds')).toEqual(['常识判断', '政治理论']);
+    expect(requested.searchParams.getAll('tagIds')).toEqual(['tag-a', 'tag-b']);
+  });
+
+  it('直接访问超出总页数的 URL 时跳到最后有效页并保持加载态', async () => {
+    let resolveLastPage: ((response: Response) => void) | undefined;
+    vi.mocked(fetch).mockImplementation(async (input) => {
+      const params = new URL(String(input), 'http://localhost').searchParams;
+      if (params.get('page') === '9') {
+        return jsonResponse({ items: [], total: 21, page: 9, pageSize: 20 });
+      }
+      return new Promise<Response>((resolve) => { resolveLastPage = resolve; });
+    });
+    renderAt('/cards?page=9&pageSize=20');
+
+    await waitFor(() => expect(new URLSearchParams(window.location.search).get('page')).toBe('2'));
+    expect(screen.getByText('正在加载卡片')).toBeInTheDocument();
+    expect(screen.queryByText('第 9 / 1 页')).not.toBeInTheDocument();
+
+    await act(async () => resolveLastPage?.(jsonResponse({ items: [card()], total: 21, page: 2, pageSize: 20 })));
+    expect(await screen.findByText('广陵与扬州为对应关系')).toBeInTheDocument();
+    expect(screen.getByText('第 2 / 2 页')).toBeInTheDocument();
+  });
+
   it('稳定呈现加载、失败和空列表状态', async () => {
     let rejectRequest: ((reason: Error) => void) | undefined;
     vi.mocked(fetch).mockReturnValue(
@@ -272,6 +317,26 @@ describe('卡片库表格和管理操作', () => {
     expect(JSON.parse(String(requests[5]?.init?.body))).toEqual({ ids: ['card-1'], archived: true });
   });
 
+  it('筛选请求开始后立即清空旧选择，请求失败也不能批量提交旧编号', async () => {
+    let rejectFilter: ((reason: Error) => void) | undefined;
+    const fetchMock = vi
+      .mocked(fetch)
+      .mockResolvedValueOnce(jsonResponse(searchResult()))
+      .mockImplementation(() => new Promise<Response>((_resolve, reject) => { rejectFilter = reject; }));
+    const user = userEvent.setup();
+    renderAt('/cards');
+
+    await user.click(await screen.findByRole('checkbox', { name: '选择广陵与扬州为对应关系' }));
+    expect(screen.getByRole('button', { name: '批量归档' })).toBeInTheDocument();
+    await user.selectOptions(screen.getByLabelText('星级筛选'), '5');
+    expect(screen.queryByRole('button', { name: '批量归档' })).not.toBeInTheDocument();
+
+    await act(async () => rejectFilter?.(new Error('filter failed')));
+    expect(await screen.findByRole('alert')).toHaveTextContent('卡片加载失败，请稍后重试');
+    expect(screen.queryByRole('button', { name: '批量归档' })).not.toBeInTheDocument();
+    expect(fetchMock.mock.calls.some(([path]) => path === '/api/cards/bulk')).toBe(false);
+  });
+
   it('单卡归档后默认移除，删除需确认且分页写回 URL', async () => {
     let items = [card()];
     const fetchMock = vi.mocked(fetch).mockImplementation(async (input, init) => {
@@ -299,6 +364,58 @@ describe('卡片库表格和管理操作', () => {
     await waitFor(() => expect(nextPage).not.toBeDisabled());
     await user.click(nextPage);
     expect(new URLSearchParams(window.location.search).get('page')).toBe('2');
+  });
+
+  it('末页最后一张删除后回到最后有效页且不呈现越界页码', async () => {
+    let pageTwoLoads = 0;
+    let resolvePageOne: ((response: Response) => void) | undefined;
+    vi.mocked(fetch).mockImplementation(async (input, init) => {
+      if (init?.method === 'DELETE') return new Response(null, { status: 204 });
+      const params = new URL(String(input), 'http://localhost').searchParams;
+      if (params.get('page') === '2') {
+        pageTwoLoads += 1;
+        return pageTwoLoads === 1
+          ? jsonResponse({ items: [card()], total: 21, page: 2, pageSize: 20 })
+          : jsonResponse({ items: [], total: 20, page: 2, pageSize: 20 });
+      }
+      return new Promise<Response>((resolve) => { resolvePageOne = resolve; });
+    });
+    const user = userEvent.setup();
+    renderAt('/cards?page=2&pageSize=20');
+
+    await user.click(await screen.findByRole('button', { name: '删除广陵与扬州为对应关系' }));
+    await waitFor(() => expect(new URLSearchParams(window.location.search).get('page')).toBe('1'));
+    expect(screen.getByText('正在加载卡片')).toBeInTheDocument();
+    expect(screen.queryByText('第 2 / 1 页')).not.toBeInTheDocument();
+
+    await act(async () => resolvePageOne?.(jsonResponse({
+      items: [card({ id: 'card-2', normalizedStatement: '第一页卡片' })],
+      total: 20,
+      page: 1,
+      pageSize: 20,
+    })));
+    expect(await screen.findByText('第一页卡片')).toBeInTheDocument();
+    expect(screen.getByText('第 1 / 1 页')).toBeInTheDocument();
+  });
+
+  it('详情抽屉约束键盘焦点，Escape 关闭后恢复查看按钮焦点', async () => {
+    vi.mocked(fetch).mockResolvedValue(jsonResponse(searchResult()));
+    const user = userEvent.setup();
+    renderAt('/cards');
+
+    const viewButton = await screen.findByRole('button', { name: '查看广陵与扬州为对应关系详情' });
+    await user.click(viewButton);
+    const closeButton = screen.getByRole('button', { name: '关闭详情' });
+    expect(closeButton).toHaveFocus();
+
+    await user.tab();
+    expect(closeButton).toHaveFocus();
+    await user.tab({ shift: true });
+    expect(closeButton).toHaveFocus();
+    await user.keyboard('{Escape}');
+
+    expect(screen.queryByRole('dialog', { name: '卡片详情' })).not.toBeInTheDocument();
+    expect(viewButton).toHaveFocus();
   });
 });
 

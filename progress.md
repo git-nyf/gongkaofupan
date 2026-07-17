@@ -1025,3 +1025,29 @@
 - `tests/frontend/cards-page.test.tsx`：补充删除确认文案不得包含唯一原文的回归断言。
 - `progress.md`：仅在文件末尾追加本轮删除确认边界修复、验证证据、改动文件清单和回滚方式。
 - 回滚方式：在本修复提交仍为当前 `HEAD` 时执行 `git revert --no-edit HEAD`。
+
+## 2026-07-17 - Task: 修复卡片库筛选状态、分页与详情抽屉交互
+
+### What was done
+
+- 板块和标签多值筛选在输入聚焦期间保留逐字输入草稿，同时立即将已识别值写入重复查询键，失焦后统一规范分隔符。
+- 新筛选或分页请求发起时立即清空旧选择，避免等待中或失败后继续对旧卡片执行批量操作。
+- 列表响应发现当前页超过实际总页数时，自动回到最后有效页并保持加载状态，覆盖直接访问越界页及末页最后一张卡片删除后的场景。
+- 详情抽屉打开后聚焦关闭按钮，约束 Tab 和 Shift+Tab 焦点，支持 Escape 关闭并将焦点恢复到原查看按钮。
+
+### Testing
+
+- TDD 红灯：运行 `npx vitest run tests/frontend/cards-page.test.tsx`，十四项中五项失败、九项通过；失败分别复现多值输入逗号被吞、筛选请求保留旧选择、直接越界页不回退、末页删除不回退及详情抽屉未接管焦点。
+- 卡片库定向测试：`npx vitest run tests/frontend/cards-page.test.tsx` 通过，一个测试文件共十四项全部通过。
+- 卡片库与录入页联合回归：`npx vitest run tests/frontend/cards-page.test.tsx tests/frontend/entry-page.test.tsx` 通过，两个测试文件共二十八项全部通过。
+- `npm test`：通过，十六个测试文件共二百五十七项全部通过。
+- `npm run typecheck`：通过，前端与服务端 TypeScript 配置均无类型错误。
+- `npm run build`：通过，前端和服务端构建成功；Vite 仍提示前端单块超过 500 KB，本轮未扩大到代码分包。
+- `git diff --check`：通过，仅输出既有 Windows 工作区的 LF/CRLF 转换提示。
+
+### Notes
+
+- `src/pages/CardsPage.tsx`：修复多值筛选草稿、请求切换选择隔离、越界页回退和详情抽屉键盘焦点闭环。
+- `tests/frontend/cards-page.test.tsx`：新增五项覆盖筛选输入、旧选择、分页回退及抽屉焦点的回归测试。
+- `progress.md`：仅在文件末尾追加本轮交互边界修复、验证证据、改动文件清单和回滚方式。
+- 回滚方式：在本修复提交仍为当前 `HEAD` 时执行 `git revert --no-edit HEAD`。
