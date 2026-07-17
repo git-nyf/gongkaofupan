@@ -5,13 +5,16 @@ import { resolve } from 'node:path';
 import { createCardRouter } from './cards/routes';
 import type { CardService } from './cards/service';
 import { createUploadRouter } from './uploads/routes';
+import { createStudyRouter } from './study/routes';
+import type { StudyService } from './study/service';
 
 interface AppDependencies {
   cardService?: CardService;
+  studyService?: StudyService;
   uploadsDirectory?: string;
 }
 
-export function createApp({ cardService, uploadsDirectory }: AppDependencies = {}) {
+export function createApp({ cardService, studyService, uploadsDirectory }: AppDependencies = {}) {
   const app = express();
 
   app.use(express.json({ limit: '2mb' }));
@@ -25,6 +28,10 @@ export function createApp({ cardService, uploadsDirectory }: AppDependencies = {
       app.use(createUploadRouter(cardService, uploadsDirectory));
     }
     app.use('/api/cards', createCardRouter(cardService));
+  }
+
+  if (studyService) {
+    app.use(createStudyRouter(studyService));
   }
 
   const clientDir = resolve(process.cwd(), 'dist/client');

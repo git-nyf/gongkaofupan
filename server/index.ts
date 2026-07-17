@@ -7,6 +7,7 @@ import { createCardService } from './cards/service';
 import { readConfig } from './config';
 import { createDatabaseManager } from './db/database';
 import { migrate } from './db/migrations';
+import { createStudyService } from './study/service';
 
 const config = readConfig();
 mkdirSync(config.dataDir, { recursive: true });
@@ -23,7 +24,8 @@ const cardService = createCardService({
   uploadsDirectory,
 });
 cardService.recoverStaleProcessing(new Date());
-const app = createApp({ cardService, uploadsDirectory });
+const studyService = createStudyService({ database: databaseManager });
+const app = createApp({ cardService, studyService, uploadsDirectory });
 
 app.listen(config.port, '127.0.0.1', () => {
   console.log(`Server listening on http://127.0.0.1:${config.port}`);

@@ -170,5 +170,41 @@ export interface StudyItem {
   mnemonic: string;
   extension: string;
   notes: string;
+  rating: number;
+  mastery: Mastery;
+  archived: boolean;
   categories: Array<{ id: string; name: string; parentId: string | null }>;
+  tags: Array<{ id: string; name: string; origin: 'user' | 'ai' }>;
+}
+
+export interface StudySessionInput {
+  categoryIds: string[];
+  cardIds: string[];
+  tagIds: string[];
+  rating?: 1 | 2 | 3 | 4 | 5;
+  mastery?: Mastery;
+  createdFrom?: string;
+  createdTo?: string;
+  count: number;
+  order: 'fixed' | 'random';
+  dueFirst: boolean;
+}
+
+export interface StudySessionResult {
+  items: StudyItem[];
+}
+
+export interface ReviewInput {
+  quizItemId: string;
+  rating: 'again' | 'hard' | 'good';
+}
+
+export interface ReviewResult {
+  quizItemId: string;
+  cardId: string;
+  rating: 'again' | 'hard' | 'good';
+  nextDueAt: string;
+  quizMastery: Mastery;
+  cardMastery: Mastery;
+  wrongCount: number;
 }

@@ -524,3 +524,39 @@
 - `docs/本地运行与数据管理.md`：补充整理中 AI 相关内容与安全元数据的编辑边界。
 - `progress.md`：仅在文件末尾追加本轮修正、验证证据、改动文件清单和回滚方式。
 - 回滚方式：在本任务提交仍为当前 `HEAD` 时执行 `git revert --no-edit HEAD`。
+
+## 2026-07-17 - Task: 增加混合卡组和 FSRS 调度
+
+### What was done
+
+- 新增混合卡组会话接口，支持分类、卡片、标签、星级、掌握度和创建日期组合筛选；只选择未归档、状态为 `ready` 且有题面的卡片，固定顺序、到期优先和服务内随机补齐均按题面独立执行。
+- 新增三级复习调度，将 `again`、`hard`、`good` 映射到 `ts-fsrs` 对应等级；新题面从空卡开始，已有题面使用已存调度状态，未开放 `Easy` 或 `Manual`。
+- 在单个 SQLite 事务内全量更新题面 FSRS 状态、插入复习日志、聚合卡片最低掌握度，并只在 `again` 时增加错误次数；日志写入失败时题面和卡片改动整体回滚。
+- 保持 `ts-fsrs@4.7.1` 兼容边界：FSRS 对象不虚构 `learning_steps`，题面更新 SQL 仍显式写入该字段并保持本次读取值不变。
+
+### Testing
+
+- TDD 首次红灯：先新增两份测试并运行 `npx vitest run tests/server/scheduler.test.ts tests/server/study-session.test.ts`，两个测试文件均因 `server/study/scheduler` 不存在而在收集阶段失败，0 项执行，符合目标模块尚未实现的预期。
+- 首次最小实现后专项共二十八项中二十四项通过；三项失败来自测试错误假设 `ts-fsrs@4.7.1` 的既有卡日志到期语义，一项失败来自测试使用不存在的分类编号。只修正测试假设后，专项二十八项全部通过。
+- 对计划要求的 `masteryRank` 固定对象契约补充 TDD：修改测试后运行调度专项，十三项中一项按预期失败，实际收到函数而不是映射对象；改为只读对象并调整服务下标访问后，两份专项二十八项全部通过。
+- `npx vitest run tests/server/health.test.ts tests/server/card-create.test.ts tests/server/cards-query.test.ts`：通过，三个既有服务端测试文件共六十三项全部通过。
+- `npm test`：通过，十个测试文件共一百五十四项全部通过；全部 AI 与随机行为使用本地注入，未访问真实网络。
+- `npm run typecheck`：通过，前端与服务端 TypeScript 配置均无类型错误。
+- `npm run build`：通过，成功生成前端与服务端构建产物。
+- `git diff --check`：通过，未发现空白格式错误；仅输出既有 Windows 工作区的 LF/CRLF 转换提示。
+- 使用 `git status --short` 与基线 `626a6d6084d2a5945825381cf1147ad23b6011d8` 差异合并核对，改动只包含本任务授权的十个文件；未修改迁移、依赖、锁文件、AI、上传、前端或其他测试。
+- 使用 PowerShell `Select-String` 扫描 `server`、`shared`、`tests`、`docs`、`progress.md` 和 `.env.example` 中的 `sk-[A-Za-z0-9]{20,}` 模式，结果为零条匹配。
+
+### Notes
+
+- `server/study/scheduler.ts`：新增掌握度排名对象、三级等级映射、数据库状态到 FSRS 卡片转换和下一次调度计算。
+- `server/study/service.ts`：新增参数化候选查询、确定性卡组选择、题面元数据组装和原子复习事务。
+- `server/study/routes.ts`：新增两个严格请求体接口、数组和日期归一化以及脱敏错误响应。
+- `server/app.ts`：新增可选复习服务装配，未提供依赖时保持既有应用行为。
+- `server/index.ts`：使用同一个数据库 manager 创建复习服务并传入应用。
+- `shared/contracts.ts`：补全背诵题面字段并新增会话与复习请求响应类型。
+- `tests/server/scheduler.test.ts`：覆盖三级映射、只读掌握度排名、卡片转换、新旧题面调度、字段有效性和输入不变。
+- `tests/server/study-session.test.ts`：使用真实临时 SQLite、真实服务和 Express 覆盖筛选、顺序、随机、排除、共享字段、事务、回滚和安全响应。
+- `docs/本地运行与数据管理.md`：补充会话与复习接口、选择语义、事务原子性和 `learning_steps` 兼容策略。
+- `progress.md`：仅在文件末尾追加本轮实现、验证证据、改动文件清单和回滚方式。
+- 回滚方式：在本任务提交仍为当前 `HEAD` 时执行 `git revert --no-edit HEAD`。
