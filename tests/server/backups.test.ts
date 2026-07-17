@@ -156,6 +156,23 @@ function marker(database: TestDatabase) {
   return row ? (JSON.parse(row.value_json) as string) : undefined;
 }
 
+function addAttachmentReference(database: TestDatabase, storedName: string) {
+  const cardId = `card-${storedName}`;
+  database.db
+    .prepare(
+      `INSERT INTO cards (id, entry_mode, raw_input, ai_status, created_at, updated_at)
+       VALUES (?, 'knowledge', ?, 'ready', ?, ?)`,
+    )
+    .run(cardId, storedName, fixedNow.toISOString(), fixedNow.toISOString());
+  database.db
+    .prepare(
+      `INSERT INTO attachments
+        (id, card_id, stored_name, original_name, mime_type, byte_size, sort_order, created_at)
+       VALUES (?, ?, ?, ?, 'image/png', 1, 0, ?)`,
+    )
+    .run(`attachment-${storedName}`, cardId, storedName, storedName, fixedNow.toISOString());
+}
+
 function expectSafeError(response: Response, status: number) {
   expect(response.status).toBe(status);
   expect(response.body).toEqual({ code: expect.any(String), message: expect.any(String) });
@@ -190,6 +207,7 @@ describe('SQLite 与图片备份恢复', () => {
     const { app, database, dataDirectory, uploadsDirectory } = setup();
     setMarker(database, '备份中的值');
     writeFileSync(path.join(uploadsDirectory, 'example.png'), 'image-content');
+    addAttachmentReference(database, 'example.png');
     writeFileSync(path.join(dataDirectory, '.env'), 'DEEPSEEK_API_KEY=private-value');
     mkdirSync(path.join(dataDirectory, 'backups'), { recursive: true });
     writeFileSync(path.join(dataDirectory, 'backups', 'old.zip'), 'old-backup');
@@ -264,9 +282,10 @@ describe('SQLite 与图片备份恢复', () => {
   });
 
   it('生成备份只收录公开名称的常用图片扩展名', async () => {
-    const { app, uploadsDirectory } = setup();
+    const { app, database, uploadsDirectory } = setup();
     for (const fileName of ['visible.png', 'visible.jpg', 'visible.jpeg', 'visible.webp']) {
       writeFileSync(path.join(uploadsDirectory, fileName), fileName);
+      addAttachmentReference(database, fileName);
     }
     writeFileSync(path.join(uploadsDirectory, '.env'), 'hidden-secret');
     writeFileSync(path.join(uploadsDirectory, '.hidden.png'), 'hidden-image');
@@ -292,6 +311,67 @@ describe('SQLite 与图片备份恢复', () => {
     );
     expect(names.join('\n')).not.toMatch(/\.env|\.hidden|notes\.txt|legacy\.gif/);
     expect((response.body as Buffer).includes(Buffer.from('hidden-secret'))).toBe(false);
+  });
+
+  it('SQLite 快照没有引用的孤儿图片不进入备份', async () => {
+    const { app, uploadsDirectory } = setup();
+    writeFileSync(path.join(uploadsDirectory, 'orphan.png'), 'orphan-image');
+
+    const response = await request(app).post('/api/backups').buffer(true).parse((response, callback) => {
+      const chunks: Buffer[] = [];
+      response.on('data', (chunk: Buffer) => chunks.push(chunk));
+      response.on('end', () => callback(null, Buffer.concat(chunks)));
+    });
+
+    expect(response.status).toBe(200);
+    const opened = await unzipper.Open.buffer(response.body as Buffer);
+    expect(opened.files.map(({ path: entryPath }) => entryPath)).not.toContain('uploads/orphan.png');
+    expect((response.body as Buffer).includes(Buffer.from('orphan-image'))).toBe(false);
+  });
+
+  it('SQLite 快照完成后新增的图片不进入本轮备份', async () => {
+    const { app, database, uploadsDirectory } = setup();
+    writeFileSync(path.join(uploadsDirectory, 'referenced.png'), 'referenced');
+    addAttachmentReference(database, 'referenced.png');
+    const realBackup = database.db.backup.bind(database.db);
+    vi.spyOn(database.db, 'backup').mockImplementation(async (destination, options) => {
+      const result = await realBackup(destination, options);
+      writeFileSync(path.join(uploadsDirectory, 'late.png'), 'late-orphan');
+      return result;
+    });
+
+    const response = await request(app).post('/api/backups').buffer(true).parse((response, callback) => {
+      const chunks: Buffer[] = [];
+      response.on('data', (chunk: Buffer) => chunks.push(chunk));
+      response.on('end', () => callback(null, Buffer.concat(chunks)));
+    });
+
+    expect(response.status).toBe(200);
+    const opened = await unzipper.Open.buffer(response.body as Buffer);
+    const names = opened.files.map(({ path: entryPath }) => entryPath);
+    expect(names).toContain('uploads/referenced.png');
+    expect(names).not.toContain('uploads/late.png');
+  });
+
+  it('SQLite 快照引用的图片在快照后缺失时整包失败且不发布 ZIP', async () => {
+    const { app, database, dataDirectory, uploadsDirectory } = setup();
+    const storedName = 'missing-after-snapshot.png';
+    const storedPath = path.join(uploadsDirectory, storedName);
+    writeFileSync(storedPath, 'referenced');
+    addAttachmentReference(database, storedName);
+    const realBackup = database.db.backup.bind(database.db);
+    vi.spyOn(database.db, 'backup').mockImplementation(async (destination, options) => {
+      const result = await realBackup(destination, options);
+      rmSync(storedPath, { force: true });
+      return result;
+    });
+
+    const response = await request(app).post('/api/backups');
+
+    expectSafeError(response, 500);
+    const names = readFileNames(path.join(dataDirectory, 'backups'));
+    expect(names.some((name) => name.endsWith('.zip'))).toBe(false);
+    expect(names.some((name) => /^(?:snapshot-|backup-.*\.tmp$)/.test(name))).toBe(false);
   });
 
   it('同一秒生成多个备份时内部文件路径唯一但下载名保持固定格式', async () => {
@@ -361,6 +441,53 @@ describe('SQLite 与图片备份恢复', () => {
 
     await expect(service.restoreBackup(archivePath)).resolves.toEqual({ restored: true });
     expect(replaceFrom).toHaveBeenCalled();
+  });
+
+  it('同步回滚快照完成后排队的写入只在失败回滚后执行并保留', async () => {
+    const source = createTestDatabase();
+    resources.push(source);
+    setMarker(source, '备份值');
+    const archivePath = path.join(source.directory, 'restore.zip');
+    await writeFile(archivePath, await backupBuffer(source));
+    const { database, dataDirectory, uploadsDirectory } = setup();
+    setMarker(database, '当前值');
+    writeFileSync(path.join(uploadsDirectory, 'current.png'), 'current');
+    const realSerialize = database.db.serialize.bind(database.db);
+    const serialize = vi.spyOn(database.db, 'serialize').mockImplementation(() => {
+      const bytes = realSerialize();
+      queueMicrotask(() => {
+        database.db
+          .prepare('INSERT OR REPLACE INTO app_settings (key, value_json) VALUES (?, ?)')
+          .run('snapshot-window-write', JSON.stringify('快照后写入'));
+      });
+      return bytes;
+    });
+    const applyUploads = vi.fn(() => {
+      throw new Error('private image replacement failure');
+    });
+    const service = createBackupService({
+      database: database.manager,
+      dataDirectory,
+      uploadsDirectory,
+      applyUploads,
+    });
+
+    await expect(service.restoreBackup(archivePath)).rejects.toMatchObject({
+      code: 'restore_failed',
+    });
+    await Promise.resolve();
+    expect(serialize).toHaveBeenCalledOnce();
+    expect(marker(database)).toBe('当前值');
+    expect(
+      JSON.parse(
+        (
+          database.db
+            .prepare('SELECT value_json FROM app_settings WHERE key = ?')
+            .get('snapshot-window-write') as { value_json: string }
+        ).value_json,
+      ),
+    ).toBe('快照后写入');
+    expect(readFileSync(path.join(uploadsDirectory, 'current.png'), 'utf8')).toBe('current');
   });
 
   it('接受真实 v1 应用数据库并在换入时迁移到当前结构', async () => {
@@ -580,6 +707,51 @@ describe('SQLite 与图片备份恢复', () => {
       ALTER TABLE loose_settings RENAME TO app_settings;
     `);
     const archive = await backupBuffer(source);
+    const { app, database } = setup();
+    setMarker(database, '当前值');
+
+    const response = await request(app)
+      .post('/api/restores')
+      .attach('backup', archive, { filename: 'backup.zip', contentType: 'application/zip' });
+
+    expectSafeError(response, 400);
+    expect(marker(database)).toBe('当前值');
+  });
+
+  it('仅删除 cards.entry_mode CHECK 且含非法行的数据库不能恢复', async () => {
+    const source = createTestDatabase();
+    resources.push(source);
+    const directory = await mkdtemp(path.join(tmpdir(), 'gongkao-no-check-db-'));
+    const databasePath = path.join(directory, 'no-check.db');
+    await writeFile(databasePath, await databaseBytes(source));
+    let modified = new Database(databasePath);
+    const schema = modified
+      .prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'cards'")
+      .get() as { sql: string };
+    const withoutCheck = schema.sql.replace(
+      " CHECK(entry_mode IN ('mistake', 'knowledge'))",
+      '',
+    );
+    expect(withoutCheck).not.toBe(schema.sql);
+    modified.pragma('foreign_keys = OFF');
+    modified.pragma('legacy_alter_table = ON');
+    modified.exec('ALTER TABLE cards RENAME TO cards_checked');
+    modified.exec(withoutCheck);
+    modified.exec(`
+      INSERT INTO cards SELECT * FROM cards_checked;
+      DROP TABLE cards_checked;
+      CREATE INDEX idx_cards_ai_status ON cards(ai_status);
+      CREATE INDEX idx_cards_archived ON cards(archived);
+    `);
+    modified
+      .prepare(
+        `INSERT INTO cards (id, entry_mode, raw_input, ai_status, created_at, updated_at)
+         VALUES ('invalid-entry-mode', 'invalid', 'invalid', 'ready', ?, ?)`,
+      )
+      .run(fixedNow.toISOString(), fixedNow.toISOString());
+    modified.close();
+    const archive = await backupBufferWithDatabase(await readFile(databasePath));
+    rmSync(directory, { recursive: true, force: true });
     const { app, database } = setup();
     setMarker(database, '当前值');
 

@@ -4,16 +4,17 @@ import {
   createReadStream,
   createWriteStream,
   existsSync,
+  lstatSync,
   mkdirSync,
   readFileSync,
   readdirSync,
   renameSync,
   rmSync,
   statSync,
+  writeFileSync,
 } from 'node:fs';
 import {
   mkdir,
-  readdir,
   readFile,
   rename,
   rm,
@@ -104,10 +105,11 @@ export function createBackupService({
 
       try {
         await database.get().backup(snapshotPath);
+        const imageFiles = readSnapshotImageFiles(snapshotPath, uploadsRoot);
         await writeBackupArchive({
           archivePath,
           snapshotPath,
-          uploadsRoot,
+          imageFiles,
           manifest: {
             format: backupFormat,
             schemaVersion: backupSchemaVersion,
@@ -118,6 +120,8 @@ export function createBackupService({
         return { filePath, fileName };
       } finally {
         await rm(snapshotPath, { force: true });
+        await rm(`${snapshotPath}-wal`, { force: true });
+        await rm(`${snapshotPath}-shm`, { force: true });
         await rm(archivePath, { force: true });
       }
     },
@@ -134,11 +138,14 @@ export function createBackupService({
         await mkdir(stagingPath, { recursive: false });
         const prepared = await prepareRestore(filePath, stagingPath);
 
-        await database.get().backup(rollbackDatabasePath);
-        await copyOrdinaryFiles(uploadsRoot, rollbackUploadsPath);
-
-        // 用户批准：换库、图片替换和失败回滚保持在同一同步临界段，避免写入落到待回滚的新库。
+        // 用户批准：回滚点、换库、图片替换和失败回滚保持在同一同步临界段。
         try {
+          createRollbackPoints(
+            database.get(),
+            rollbackDatabasePath,
+            uploadsRoot,
+            rollbackUploadsPath,
+          );
           database.replaceFrom(prepared.databasePath);
           const result = applyUploads(
             prepared.uploadsPath,
@@ -205,15 +212,14 @@ export function createBackupService({
 async function writeBackupArchive({
   archivePath,
   snapshotPath,
-  uploadsRoot,
+  imageFiles,
   manifest,
 }: {
   archivePath: string;
   snapshotPath: string;
-  uploadsRoot: string;
+  imageFiles: Array<{ absolutePath: string; relativePath: string }>;
   manifest: Manifest;
 }) {
-  const imageFiles = await listOrdinaryFiles(uploadsRoot, isBackupImageName);
   const output = createWriteStream(archivePath, { flags: 'wx' });
   const archive = archiver('zip', { zlib: { level: 9 } });
   const inputs = [snapshotPath, ...imageFiles.map(({ absolutePath }) => absolutePath)].map(
@@ -249,28 +255,57 @@ async function writeBackupArchive({
   }
 }
 
-async function listOrdinaryFiles(
-  directory: string,
-  include: (fileName: string) => boolean = () => true,
-): Promise<Array<{ absolutePath: string; relativePath: string }>> {
-  let entries;
+function readSnapshotImageFiles(snapshotPath: string, uploadsRoot: string) {
+  let snapshot: Database.Database | undefined;
   try {
-    entries = await readdir(directory, { withFileTypes: true });
+    snapshot = new Database(snapshotPath, { readonly: true, fileMustExist: true });
+    const rows = snapshot
+      .prepare('SELECT stored_name FROM attachments ORDER BY stored_name')
+      .all() as Array<{ stored_name: string }>;
+    return rows.map(({ stored_name }) => {
+      if (!isBackupImageName(stored_name) || path.basename(stored_name) !== stored_name) {
+        throw new Error('附件存储名无效');
+      }
+      const absolutePath = path.resolve(uploadsRoot, stored_name);
+      if (!absolutePath.startsWith(`${uploadsRoot}${path.sep}`)) {
+        throw new Error('附件路径无效');
+      }
+      const file = lstatSync(absolutePath);
+      if (!file.isFile() || file.isSymbolicLink()) {
+        throw new Error('附件文件无效');
+      }
+      return { absolutePath, relativePath: stored_name };
+    });
+  } finally {
+    snapshot?.close();
+  }
+}
+
+function createRollbackPoints(
+  database: Database.Database,
+  rollbackDatabasePath: string,
+  uploadsRoot: string,
+  rollbackUploadsPath: string,
+) {
+  writeFileSync(rollbackDatabasePath, database.serialize(), { flag: 'wx' });
+  mkdirSync(rollbackUploadsPath, { recursive: false });
+  let entries: import('node:fs').Dirent[];
+  try {
+    entries = readdirSync(uploadsRoot, { withFileTypes: true });
   } catch (error) {
-    if (isMissingPath(error)) return [];
+    if (typeof error === 'object' && error !== null && Reflect.get(error, 'code') === 'ENOENT') {
+      return;
+    }
     throw error;
   }
-
-  const files: Array<{ absolutePath: string; relativePath: string }> = [];
   for (const entry of entries) {
-    if (entry.isFile() && include(entry.name)) {
-      files.push({
-        absolutePath: path.join(directory, entry.name),
-        relativePath: entry.name,
-      });
+    if (entry.isFile()) {
+      copyFileSync(
+        path.join(uploadsRoot, entry.name),
+        path.join(rollbackUploadsPath, entry.name),
+      );
     }
   }
-  return files;
 }
 
 function isBackupImageName(fileName: string) {
@@ -590,6 +625,7 @@ function validateSchemaAgainstCanonical(
       throw new BackupServiceError('invalid_backup');
     }
     if (
+      readNormalizedTableSql(database, name) !== readNormalizedTableSql(canonical, name) ||
       JSON.stringify(readTableInfo(database, name)) !==
         JSON.stringify(readTableInfo(canonical, name)) ||
       JSON.stringify(readForeignKeys(database, name)) !==
@@ -600,6 +636,14 @@ function validateSchemaAgainstCanonical(
       throw new BackupServiceError('invalid_backup');
     }
   }
+}
+
+function readNormalizedTableSql(database: Database.Database, table: string) {
+  const row = database
+    .prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?")
+    .get(table) as { sql: string } | undefined;
+  if (!row?.sql) throw new BackupServiceError('invalid_backup');
+  return row.sql.replace(/\s+/g, ' ').trim();
 }
 
 function readTableInfo(database: Database.Database, table: string) {
@@ -650,15 +694,6 @@ function readUniqueIndexes(database: Database.Database, table: string) {
 
 function quoteIdentifier(value: string) {
   return `"${value.replaceAll('"', '""')}"`;
-}
-
-async function copyOrdinaryFiles(source: string, destination: string) {
-  await mkdir(destination, { recursive: true });
-  for (const file of await listOrdinaryFiles(source)) {
-    const target = path.join(destination, ...file.relativePath.split('/'));
-    await mkdir(path.dirname(target), { recursive: true });
-    await pipeline(createReadStream(file.absolutePath), createWriteStream(target, { flags: 'wx' }));
-  }
 }
 
 function replaceUploads(
@@ -729,8 +764,4 @@ function isPromiseLike(value: unknown): value is PromiseLike<unknown> {
 function formatTimestamp(value: Date) {
   const iso = value.toISOString();
   return `${iso.slice(0, 10).replaceAll('-', '')}-${iso.slice(11, 19).replaceAll(':', '')}`;
-}
-
-function isMissingPath(error: unknown) {
-  return typeof error === 'object' && error !== null && Reflect.get(error, 'code') === 'ENOENT';
 }
