@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { CardDetail } from '../../shared/contracts';
@@ -395,6 +395,82 @@ describe('录入表单', () => {
 
     expect(await screen.findByRole('alert')).toHaveTextContent('当前卡片暂不支持追加图片，请先移除待上传图片');
     expect(screen.getByText('已保存附件：既有图片.png')).toBeInTheDocument();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('保存请求在同一批次内只发一次并在完成前禁用取消', async () => {
+    const user = userEvent.setup();
+    let resolveRequest: ((response: Response) => void) | undefined;
+    const request = new Promise<Response>((resolve) => { resolveRequest = resolve; });
+    const fetchMock = vi.mocked(fetch).mockReturnValue(request);
+    render(<EntryPage />);
+    await chooseRequiredFields(user);
+
+    const saveButton = screen.getByRole('button', { name: '保存并自动整理' });
+    const cancelButton = screen.getByRole('button', { name: '取消' });
+    const form = saveButton.closest('form');
+    expect(form).not.toBeNull();
+    act(() => {
+      form?.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+      form?.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(saveButton).toBeDisabled();
+    expect(cancelButton).toBeDisabled();
+    fireEvent.click(cancelButton);
+    expect(screen.getByRole('textbox', { name: '原始内容' })).toHaveTextContent('广陵=扬州');
+
+    resolveRequest?.(jsonResponse(card({ aiStatus: 'pending', quizItems: [] }), 201));
+
+    expect(await screen.findByText('已保存，等待重新整理')).toBeInTheDocument();
+    expect(screen.getByRole('textbox', { name: '原始内容' })).toHaveTextContent('广陵=扬州');
+    expect(cancelButton).toBeEnabled();
+  });
+
+  it('ready 后清空新建表单和附件但保留成功文案', async () => {
+    const user = userEvent.setup();
+    const attachment = {
+      id: 'ready-attachment',
+      url: '/uploads/ready.png',
+      originalName: '已保存.png',
+      mimeType: 'image/png',
+      byteSize: 5,
+    };
+    const fetchMock = vi.mocked(fetch).mockResolvedValue(
+      jsonResponse(card({ attachments: [attachment] }), 201),
+    );
+    render(<EntryPage />);
+    await chooseRequiredFields(user);
+    await user.click(screen.getByRole('radio', { name: '知识点积累' }));
+    await user.selectOptions(screen.getByRole('combobox', { name: '模板' }), '常识判断');
+    await user.type(screen.getByRole('textbox', { name: '正确解析' }), '广陵对应扬州');
+    await user.type(screen.getByLabelText('标签'), '古今地名');
+    await user.upload(
+      screen.getByLabelText('图片'),
+      new File(['image'], '待上传.png', { type: 'image/png' }),
+    );
+
+    await user.click(screen.getByRole('button', { name: '保存并自动整理' }));
+
+    expect(await screen.findByText('已生成 2 个背诵方向')).toBeInTheDocument();
+    expect(screen.getByRole('radio', { name: '错题录入' })).toBeChecked();
+    expect(screen.getByRole('combobox', { name: '模板' })).toHaveValue('言语理解');
+    expect(screen.getByRole('textbox', { name: '原始内容' })).toHaveTextContent('');
+    expect(screen.getByRole('textbox', { name: '正确解析' })).toHaveValue('');
+    expect(screen.getByRole('checkbox', { name: '常识判断' })).not.toBeChecked();
+    expect(screen.queryByRole('checkbox', { name: '文史' })).not.toBeInTheDocument();
+    expect(screen.getByLabelText('标签')).toHaveValue('');
+    expect(screen.getByLabelText('图片')).toHaveValue('');
+    expect(screen.queryByText('待上传.png')).not.toBeInTheDocument();
+    expect(screen.queryByText('已保存附件：已保存.png')).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: '保存并自动整理' }));
+
+    expect(screen.getByText('请选择至少一个所属板块')).toBeInTheDocument();
+    expect(screen.getByText('请选择至少一个细分考点')).toBeInTheDocument();
+    expect(screen.getByText('请输入原始内容')).toBeInTheDocument();
+    expect(screen.getByText('已生成 2 个背诵方向')).toBeInTheDocument();
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 

@@ -907,3 +907,27 @@
 - `tests/frontend/entry-page.test.tsx`：新增撤销禁用、粘贴节点白名单和单一地标回归测试。
 - `progress.md`：仅在文件末尾追加本轮规范修复、验证证据、改动文件清单和回滚方式。
 - 回滚方式：在本修复提交仍为当前 `HEAD` 时执行 `git revert --no-edit HEAD`。
+
+## 2026-07-17 - Task: 修正录入保存状态机和成功后表单清理
+
+### What was done
+
+- 使用同步请求锁覆盖完整保存请求生命周期，避免同一界面更新批次内重复提交；保存期间同时禁用保存和取消操作，请求结束后恢复操作。
+- 整理完成时清空录入模式、模板、正文、可选字段、分类、来源、星级、掌握程度、标签以及暂存和已保存附件展示，同时保留成功提示，避免原内容被再次创建。
+- 待整理和待完善状态继续保留当前表单、服务端附件和卡片编号，后续保存仍更新同一卡片。
+
+### Testing
+
+- TDD 红灯：首次运行 `npx vitest run tests/frontend/entry-page.test.tsx` 共十四项，十二项通过、两项失败；失败分别确认同一批次内连续提交会发出两次请求，以及整理完成后表单未恢复初始值。
+- 定向测试：`npx vitest run tests/frontend/entry-page.test.tsx` 通过，一个测试文件共十四项全部通过；新增覆盖请求同步去重、保存期间禁用取消、整理完成后清空表单与附件、保留成功提示及阻止空表单再次提交。
+- `npm test`：通过，十五个测试文件共二百四十三项全部通过。
+- `npm run typecheck`：通过，前端与服务端 TypeScript 配置均无类型错误。
+- `npm run build`：通过，前端入口脚本为 521.71 KB，服务端产物为 107.20 KB；Vite 仍提示前端单块超过 500 KB，本轮未扩大到代码分包。
+- `git diff --check`：通过，仅输出既有 Windows 工作区的 LF/CRLF 转换提示。
+
+### Notes
+
+- `src/pages/EntryPage.tsx`：增加保存请求同步锁、保存期间取消禁用和整理完成后的表单值清理。
+- `tests/frontend/entry-page.test.tsx`：新增重复提交、保存期间取消和整理完成后清空表单的回归测试。
+- `progress.md`：仅在文件末尾追加本轮状态机修正、验证证据、改动文件清单和回滚方式。
+- 回滚方式：在本修复提交仍为当前 `HEAD` 时执行 `git revert --no-edit HEAD`。

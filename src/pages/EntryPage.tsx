@@ -31,6 +31,7 @@ const primaryCategories = Object.entries(categoryCatalog) as Array<
 
 export function EntryPage() {
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const saveInFlightRef = useRef(false);
   const [entryMode, setEntryMode] = useState<EntryMode>('mistake');
   const [templateName, setTemplateName] = useState(entryTemplates[0].name);
   const [rawInput, setRawInput] = useState('');
@@ -64,7 +65,7 @@ export function EntryPage() {
     [selectedPrimary, selectedSecondary],
   );
 
-  const resetForm = () => {
+  const clearFormValues = () => {
     setEntryMode('mistake');
     setTemplateName(entryTemplates[0].name);
     setRawInput('');
@@ -84,10 +85,14 @@ export function EntryPage() {
     setStagedFiles([]);
     setPersistedAttachments([]);
     setCurrentCardId(undefined);
-    setSaveState('idle');
-    setStatusMessage('');
     setRequiredErrors({});
     if (fileInputRef.current) fileInputRef.current.value = '';
+  };
+
+  const resetForm = () => {
+    clearFormValues();
+    setSaveState('idle');
+    setStatusMessage('');
   };
 
   const togglePrimary = (category: string, selected: boolean) => {
@@ -114,7 +119,7 @@ export function EntryPage() {
 
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    if (saveState === 'saving') return;
+    if (saveInFlightRef.current) return;
 
     const errors: RequiredErrors = {};
     if (selectedPrimary.length === 0) errors.categories = '请选择至少一个所属板块';
@@ -129,6 +134,7 @@ export function EntryPage() {
       return;
     }
 
+    saveInFlightRef.current = true;
     setSaveState('saving');
     setStatusMessage('正在保存并自动整理');
     try {
@@ -175,22 +181,26 @@ export function EntryPage() {
     } catch {
       setSaveState('error');
       setStatusMessage('保存失败，请稍后重试');
+    } finally {
+      saveInFlightRef.current = false;
     }
   };
 
   const applySaveResult = (detail: CardDetail) => {
     const resultState = detail.aiStatus === 'processing' ? 'pending' : detail.aiStatus;
+    if (resultState === 'ready') {
+      clearFormValues();
+      setSaveState('ready');
+      setStatusMessage(`已生成 ${detail.quizItems.length} 个背诵方向`);
+      return;
+    }
+
     setStagedFiles([]);
     if (fileInputRef.current) fileInputRef.current.value = '';
     setPersistedAttachments(
       detail.attachments.map(({ id, originalName }) => ({ id, originalName })),
     );
     setSaveState(resultState);
-    if (resultState === 'ready') {
-      setCurrentCardId(undefined);
-      setStatusMessage(`已生成 ${detail.quizItems.length} 个背诵方向`);
-      return;
-    }
     setCurrentCardId(detail.id);
     setStatusMessage(
       resultState === 'pending'
@@ -233,7 +243,7 @@ export function EntryPage() {
             </label>
           </div>
           <div className="entry-page__actions">
-            <button className="button button--secondary" onClick={resetForm} type="button">
+            <button className="button button--secondary" disabled={saveState === 'saving'} onClick={resetForm} type="button">
               <X aria-hidden="true" size={17} />
               取消
             </button>
