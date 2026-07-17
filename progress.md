@@ -641,3 +641,27 @@
 - `server/index.ts`：新增统计服务实例，并在现有应用创建调用中传入统计服务和非敏感设置依赖；该跨原任务文件改动用于修复真实生产入口不可用问题。
 - `progress.md`：仅在文件末尾追加本轮修正、验证证据、改动文件清单和回滚方式。
 - 回滚方式：在本修正提交仍为当前 `HEAD` 时执行 `git revert --no-edit HEAD`。
+
+## 2026-07-17 - Task: 修正设置更新原子性与统计测试夹具
+
+### What was done
+
+- 设置修改改为在同一个 SQLite 事务内完成写入、完整读取和白名单值校验；任一已有设置的 JSON 损坏或枚举非法时，本次修改随读取异常一起回滚，不再出现接口返回失败但新值已经落库。
+- 统计测试夹具改为每张卡同时绑定一个一级板块和匹配的二级考点，并验证薄弱统计仍只聚合一级板块，分数和涉及卡片数不会因二级关系翻倍。
+
+### Testing
+
+- TDD 红灯：预置合法的 `dueFirst=true`，并分别预置非法 `defaultOrder` 枚举和损坏 JSON 后运行 `npx vitest run tests/server/settings.test.ts`；六项中两项按预期失败，接口虽返回 500，但数据库中的 `dueFirst` 均错误变为 `false`，其余四项通过。
+- TDD 绿灯：将完整响应读取移入同一事务后运行 `npx vitest run tests/server/settings.test.ts tests/server/analytics.test.ts`，两个文件共十项全部通过；两种损坏场景均保持旧值 `true`，一、二级分类并存时薄弱分和卡片数仍正确。
+- `npm test`：通过，十二个测试文件共一百六十四项全部通过，未访问真实网络。
+- `npm run typecheck`：通过，前端与服务端 TypeScript 配置均无类型错误。
+- `npm run build`：通过，成功生成前端与服务端构建产物。
+- `git diff --check`：通过，未发现空白格式错误；仅输出既有 Windows 工作区的 LF/CRLF 转换提示。
+
+### Notes
+
+- `server/settings/routes.ts`：让设置写入事务返回已读取并校验的完整响应，使读取失败自动回滚写入。
+- `tests/server/settings.test.ts`：新增非法枚举和损坏 JSON 下的失败不落库回归测试。
+- `tests/server/analytics.test.ts`：让卡片夹具同时绑定一、二级分类，并增加关系数量与一级聚合断言。
+- `progress.md`：仅在文件末尾追加本轮质量修正、验证证据、改动文件清单和回滚方式。
+- 回滚方式：在本修正提交仍为当前 `HEAD` 时执行 `git revert --no-edit HEAD`。

@@ -90,6 +90,27 @@ describe('非敏感设置接口', () => {
     expect(database.db.prepare('SELECT * FROM app_settings').all()).toEqual([]);
   });
 
+  it.each([
+    ['非法枚举', '"sql-random"'],
+    ['损坏 JSON', '{broken'],
+  ])('完整响应读取遇到%s时回滚本次设置修改', async (_caseName, corruptValue) => {
+    const { database, app } = setup();
+    database.db
+      .prepare('INSERT INTO app_settings (key, value_json) VALUES (?, ?)')
+      .run('dueFirst', 'true');
+    database.db
+      .prepare('INSERT INTO app_settings (key, value_json) VALUES (?, ?)')
+      .run('defaultOrder', corruptValue);
+
+    const response = await request(app).patch('/api/settings').send({ dueFirst: false });
+
+    expect(response.status).toBe(500);
+    expect(response.body).toEqual({ code: 'internal_error', message: expect.any(String) });
+    expect(
+      database.db.prepare("SELECT value_json FROM app_settings WHERE key = 'dueFirst'").get(),
+    ).toEqual({ value_json: 'true' });
+  });
+
   it('未装配设置依赖时接口不存在', async () => {
     expect((await request(createApp()).get('/api/settings')).status).toBe(404);
     expect((await request(createApp()).patch('/api/settings').send({ dueFirst: false })).status).toBe(

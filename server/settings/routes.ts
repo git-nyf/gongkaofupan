@@ -65,9 +65,9 @@ export function createSettingsRouter({ database, deepseekApiKey }: SettingsRoute
         for (const [key, value] of Object.entries(parsed.data)) {
           write.run(key, JSON.stringify(value));
         }
+        return readResponse(database, deepseekApiKey);
       });
-      update();
-      response.status(200).json(readResponse(database, deepseekApiKey));
+      response.status(200).json(update());
     } catch {
       response.status(500).json({ code: 'internal_error', message: '设置保存失败' });
     }

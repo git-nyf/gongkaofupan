@@ -19,6 +19,13 @@ interface CardFixture {
   title?: string;
 }
 
+const childCategoryByParent: Record<string, string> = {
+  资料分析: '资料分析/基础公式',
+  常识判断: '常识判断/法律',
+  言语理解: '言语理解/逻辑填空',
+  数量关系: '数量关系/工程',
+};
+
 function localDayRange(now: Date) {
   const start = new Date(now);
   start.setHours(0, 0, 0, 0);
@@ -45,9 +52,11 @@ function insertCard(database: TestDatabase, fixture: CardFixture) {
       fixture.createdAt,
       fixture.createdAt,
     );
-  database.db
-    .prepare('INSERT INTO card_categories (card_id, category_id) VALUES (?, ?)')
-    .run(fixture.id, fixture.categoryId);
+  const insertCategory = database.db.prepare(
+    'INSERT INTO card_categories (card_id, category_id) VALUES (?, ?)',
+  );
+  insertCategory.run(fixture.id, fixture.categoryId);
+  insertCategory.run(fixture.id, childCategoryByParent[fixture.categoryId]);
   database.db
     .prepare(`
       INSERT INTO quiz_items (
@@ -182,6 +191,9 @@ describe('总览与复盘统计', () => {
       { categoryId: '资料分析', categoryName: '资料分析', score: 5, cardCount: 2 },
       { categoryId: '常识判断', categoryName: '常识判断', score: 1, cardCount: 1 },
     ]);
+    expect(
+      database.db.prepare('SELECT COUNT(*) AS count FROM card_categories').get(),
+    ).toEqual({ count: 10 });
     expect(response.body.weakness).not.toEqual(
       expect.arrayContaining([
         expect.objectContaining({ categoryName: '言语理解' }),
