@@ -58,6 +58,7 @@ interface BackupServiceDependencies {
   now?: () => Date;
   applyUploads?: typeof replaceUploads;
   cleanupPaths?: typeof cleanupRestorePaths;
+  copyRollbackFile?: (sourcePath: string, destinationPath: string) => void;
 }
 
 interface Manifest {
@@ -85,6 +86,7 @@ export function createBackupService({
   now = () => new Date(),
   applyUploads = replaceUploads,
   cleanupPaths = cleanupRestorePaths,
+  copyRollbackFile = copyFileSync,
 }: BackupServiceDependencies): BackupService {
   const dataRoot = path.resolve(dataDirectory);
   const uploadsRoot = path.resolve(uploadsDirectory);
@@ -134,6 +136,8 @@ export function createBackupService({
       const rollbackUploadsPath = path.join(backupsRoot, `rollback-${operationId}-uploads`);
       const activeUploadsPath = path.join(backupsRoot, `active-${operationId}-uploads`);
       let rollbackFailed = false;
+      let rollbackReady = false;
+      let replacementStarted = false;
       try {
         await mkdir(stagingPath, { recursive: false });
         const prepared = await prepareRestore(filePath, stagingPath);
@@ -145,7 +149,10 @@ export function createBackupService({
             rollbackDatabasePath,
             uploadsRoot,
             rollbackUploadsPath,
+            copyRollbackFile,
           );
+          rollbackReady = true;
+          replacementStarted = true;
           database.replaceFrom(prepared.databasePath);
           const result = applyUploads(
             prepared.uploadsPath,
@@ -158,6 +165,9 @@ export function createBackupService({
             throw new Error('图片替换操作必须同步完成');
           }
         } catch {
+          if (!rollbackReady || !replacementStarted) {
+            throw new BackupServiceError('restore_failed');
+          }
           const rollbackErrors: unknown[] = [];
           try {
             database.replaceFrom(rollbackDatabasePath);
@@ -286,25 +296,45 @@ function createRollbackPoints(
   rollbackDatabasePath: string,
   uploadsRoot: string,
   rollbackUploadsPath: string,
+  copyRollbackFile: (sourcePath: string, destinationPath: string) => void,
 ) {
-  writeFileSync(rollbackDatabasePath, database.serialize(), { flag: 'wx' });
-  mkdirSync(rollbackUploadsPath, { recursive: false });
-  let entries: import('node:fs').Dirent[];
+  const rollbackDatabasePartialPath = `${rollbackDatabasePath}.partial`;
+  const rollbackUploadsPartialPath = `${rollbackUploadsPath}.partial`;
   try {
-    entries = readdirSync(uploadsRoot, { withFileTypes: true });
+    writeFileSync(rollbackDatabasePartialPath, database.serialize(), { flag: 'wx' });
+    mkdirSync(rollbackUploadsPartialPath, { recursive: false });
+    let entries: import('node:fs').Dirent[] = [];
+    try {
+      entries = readdirSync(uploadsRoot, { withFileTypes: true });
+    } catch (error) {
+      if (typeof error !== 'object' || error === null || Reflect.get(error, 'code') !== 'ENOENT') {
+        throw error;
+      }
+    }
+    for (const entry of entries) {
+      if (entry.isFile()) {
+        copyRollbackFile(
+          path.join(uploadsRoot, entry.name),
+          path.join(rollbackUploadsPartialPath, entry.name),
+        );
+      }
+    }
+    renameSync(rollbackDatabasePartialPath, rollbackDatabasePath);
+    renameSync(rollbackUploadsPartialPath, rollbackUploadsPath);
   } catch (error) {
-    if (typeof error === 'object' && error !== null && Reflect.get(error, 'code') === 'ENOENT') {
-      return;
+    for (const item of [
+      rollbackDatabasePartialPath,
+      rollbackUploadsPartialPath,
+      rollbackDatabasePath,
+      rollbackUploadsPath,
+    ]) {
+      try {
+        rmSync(item, { recursive: true, force: true });
+      } catch {
+        // 清理失败不覆盖回滚点创建的原始错误。
+      }
     }
     throw error;
-  }
-  for (const entry of entries) {
-    if (entry.isFile()) {
-      copyFileSync(
-        path.join(uploadsRoot, entry.name),
-        path.join(rollbackUploadsPath, entry.name),
-      );
-    }
   }
 }
 

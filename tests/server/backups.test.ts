@@ -1,4 +1,5 @@
 import {
+  copyFileSync,
   existsSync,
   mkdirSync,
   readdirSync,
@@ -441,6 +442,45 @@ describe('SQLite 与图片备份恢复', () => {
 
     await expect(service.restoreBackup(archivePath)).resolves.toEqual({ restored: true });
     expect(replaceFrom).toHaveBeenCalled();
+  });
+
+  it('回滚图片复制中途失败时不替换当前数据库和图片', async () => {
+    const source = createTestDatabase();
+    resources.push(source);
+    setMarker(source, '备份值');
+    const archivePath = path.join(source.directory, 'restore.zip');
+    await writeFile(archivePath, await backupBuffer(source));
+    const { database, dataDirectory, uploadsDirectory } = setup();
+    setMarker(database, '当前值');
+    writeFileSync(path.join(uploadsDirectory, 'first.png'), 'first-current-image');
+    writeFileSync(path.join(uploadsDirectory, 'second.jpg'), 'second-current-image');
+    const realReplace = database.manager.replaceFrom.bind(database.manager);
+    const replaceFrom = vi.fn((replacementPath: string) => realReplace(replacementPath));
+    let copiedFiles = 0;
+    const copyRollbackFile = vi.fn((sourcePath: string, destinationPath: string) => {
+      copiedFiles += 1;
+      if (copiedFiles === 2) throw new Error('private second rollback image copy failure');
+      copyFileSync(sourcePath, destinationPath);
+    });
+    const service = createBackupService({
+      database: { get: () => database.manager.get(), replaceFrom },
+      dataDirectory,
+      uploadsDirectory,
+      copyRollbackFile,
+    });
+
+    await expect(service.restoreBackup(archivePath)).rejects.toMatchObject({
+      code: 'restore_failed',
+    });
+    expect(copyRollbackFile).toHaveBeenCalledTimes(2);
+    expect(replaceFrom).not.toHaveBeenCalled();
+    expect(marker(database)).toBe('当前值');
+    expect(readFileSync(path.join(uploadsDirectory, 'first.png'), 'utf8')).toBe(
+      'first-current-image',
+    );
+    expect(readFileSync(path.join(uploadsDirectory, 'second.jpg'), 'utf8')).toBe(
+      'second-current-image',
+    );
   });
 
   it('同步回滚快照完成后排队的写入只在失败回滚后执行并保留', async () => {
