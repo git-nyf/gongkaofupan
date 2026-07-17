@@ -979,3 +979,27 @@
 - `docs/本地运行与数据管理.md`：补充卡片库筛选、标签编号、批量操作、详情与编辑复用说明。
 - `progress.md`：仅在文件末尾追加本轮实现、验证证据、改动文件清单和回滚方式。
 - 回滚方式：在本任务提交仍为当前 `HEAD` 时执行 `git revert --no-edit HEAD`。
+
+## 2026-07-17 - Task: 修复编辑路由状态残留与待整理原文泄露
+
+### What was done
+
+- 录入页按普通新建、不同编辑卡片编号为表单设置稳定实例键；从 `/entry?edit=<卡片编号>` 通过站内导航返回 `/entry` 时会重建空白新建表单，后续保存只创建新卡片，同时不影响普通无编辑参数页面内待整理和待完善卡片的同卡续存。
+- 卡片规范知识为空时，表格知识点、悬停标题、复选框和操作可访问名称统一使用“待生成知识点”，不再在详情抽屉外暴露原始输入；详情抽屉继续显示完整原文。
+
+### Testing
+
+- TDD 红灯：新增两项回归后运行 `npx vitest run tests/frontend/cards-page.test.tsx`，九项中七项通过、两项失败；编辑转新建测试确认标题已切回“录入”但原文仍为旧卡片内容，待整理测试确认表格文本、悬停标题、复选框和四个操作名称均包含唯一原文。
+- 定向测试：`npx vitest run tests/frontend/cards-page.test.tsx` 通过，一个测试文件共九项全部通过；覆盖编辑转新建后清空表单、仅发送 `POST /api/cards`、不再 `PATCH` 旧卡，以及待整理原文仅在详情抽屉显示。
+- `npm test`：通过，十六个测试文件共二百五十二项全部通过。
+- `npm run typecheck`：通过，前端与服务端 TypeScript 配置均无类型错误。
+- `npm run build`：通过，前端和服务端构建成功；Vite 仍提示前端单块超过 500 KB，本轮未扩大到代码分包。
+- `git diff --check`：通过，仅输出既有 Windows 工作区的 LF/CRLF 转换提示。
+
+### Notes
+
+- `src/pages/EntryPage.tsx`：按新建或编辑卡片编号设置表单实例键，切换路由身份时清除旧表单状态。
+- `src/pages/CardsPage.tsx`：规范知识为空时使用中性占位替代原始输入。
+- `tests/frontend/cards-page.test.tsx`：新增编辑转新建请求语义和待整理原文隔离回归测试，并补齐编辑器测试所需的 jsdom 几何桩。
+- `progress.md`：仅在文件末尾追加本轮审查修复、验证证据、改动文件清单和回滚方式。
+- 回滚方式：在本修复提交仍为当前 `HEAD` 时执行 `git revert --no-edit HEAD`。

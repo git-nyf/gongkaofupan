@@ -38,7 +38,8 @@ export function EntryPage() {
 
 function RoutedEntryPage() {
   const [searchParams] = useSearchParams();
-  return <EntryForm editId={searchParams.get('edit')?.trim() || undefined} />;
+  const editId = searchParams.get('edit')?.trim() || undefined;
+  return <EntryForm editId={editId} key={editId ? `edit:${editId}` : 'new'} />;
 }
 
 function EntryForm({ editId }: { editId?: string }) {

@@ -323,7 +323,7 @@ function CardTable({
         </thead>
         <tbody>
           {cards.map((card) => {
-            const title = card.normalizedStatement || card.rawInput;
+            const title = card.normalizedStatement || '待生成知识点';
             return (
               <tr key={card.id}>
                 <td>

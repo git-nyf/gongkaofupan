@@ -78,6 +78,18 @@ function renderAt(path: string) {
 }
 
 beforeEach(() => {
+  Object.defineProperty(Range.prototype, 'getBoundingClientRect', {
+    configurable: true,
+    value: () => new DOMRect(),
+  });
+  Object.defineProperty(Range.prototype, 'getClientRects', {
+    configurable: true,
+    value: () => [],
+  });
+  Object.defineProperty(document, 'elementFromPoint', {
+    configurable: true,
+    value: () => null,
+  });
   window.history.pushState({}, '', '/');
   vi.stubGlobal('fetch', vi.fn());
   vi.stubGlobal('confirm', vi.fn(() => true));
@@ -202,6 +214,26 @@ describe('卡片库表格和管理操作', () => {
     expect(screen.getByRole('button', { name: '关闭详情' })).toHaveAttribute('title', '关闭详情');
   });
 
+  it('规范知识为空时表格和操作名称使用中性占位，原文仍只在详情抽屉显示', async () => {
+    const rawInput = '只允许详情查看的唯一原文';
+    vi.mocked(fetch).mockResolvedValue(
+      jsonResponse(searchResult([card({ aiStatus: 'pending', normalizedStatement: '', rawInput })])),
+    );
+    const user = userEvent.setup();
+    renderAt('/cards');
+
+    const table = await screen.findByRole('table');
+    expect(within(table).getByText('待生成知识点')).toBeInTheDocument();
+    expect(table.outerHTML).not.toContain(rawInput);
+    expect(within(table).queryByText(rawInput)).not.toBeInTheDocument();
+    expect(within(table).queryByRole('checkbox', { name: new RegExp(rawInput) })).not.toBeInTheDocument();
+    expect(within(table).queryByRole('button', { name: new RegExp(rawInput) })).not.toBeInTheDocument();
+    expect(within(table).queryByRole('link', { name: new RegExp(rawInput) })).not.toBeInTheDocument();
+
+    await user.click(within(table).getByRole('button', { name: '查看待生成知识点详情' }));
+    expect(screen.getByRole('dialog', { name: '卡片详情' })).toHaveTextContent(rawInput);
+  });
+
   it('选中后分别批量加星、添加标签和归档，成功刷新并清空选择', async () => {
     const requests: Array<{ path: string; init?: RequestInit }> = [];
     const fetchMock = vi.mocked(fetch).mockImplementation(async (input, init) => {
@@ -295,5 +327,40 @@ describe('卡片编辑复用录入表单', () => {
       expect(fetchMock.mock.calls.filter(([path, init]) => path === '/api/cards/card-1' && init?.method === 'PATCH')).toHaveLength(2);
     });
     expect(fetchMock.mock.calls.some(([path, init]) => path === '/api/cards' && init?.method === 'POST')).toBe(false);
+  });
+
+  it('从编辑页通过 SPA 返回普通录入页后重建新表单并只创建新卡片', async () => {
+    const fetchMock = vi.mocked(fetch).mockImplementation(async (input, init) => {
+      const path = String(input);
+      if (path === '/api/cards/card-1' && (!init?.method || init.method === 'GET')) {
+        return jsonResponse(card());
+      }
+      if (path === '/api/cards' && init?.method === 'POST') {
+        return jsonResponse(card({ id: 'new-card', aiStatus: 'pending', quizItems: [] }), 201);
+      }
+      throw new Error(`unexpected request: ${path}`);
+    });
+    const user = userEvent.setup();
+    renderAt('/entry?edit=card-1');
+    expect(await screen.findByRole('textbox', { name: '正确解析' })).toHaveValue('广陵对应扬州');
+
+    await user.click(screen.getByRole('link', { name: '录入' }));
+    expect(await screen.findByRole('heading', { name: '录入' })).toBeInTheDocument();
+    expect(screen.getByRole('textbox', { name: '原始内容' })).toHaveTextContent(/^$/);
+    expect(screen.getByRole('textbox', { name: '正确解析' })).toHaveValue('');
+    expect(screen.getByLabelText('标签')).toHaveValue('');
+    expect(screen.getByRole('combobox', { name: '模板' })).toHaveValue('言语理解');
+
+    await user.click(screen.getByRole('checkbox', { name: '常识判断' }));
+    await user.click(screen.getByRole('checkbox', { name: '文史' }));
+    fireEvent.paste(screen.getByRole('textbox', { name: '原始内容' }), {
+      clipboardData: { getData: (type: string) => type === 'text/plain' ? '新建卡片原文' : '' },
+    });
+    await waitFor(() => expect(screen.getByRole('textbox', { name: '原始内容' })).toHaveTextContent('新建卡片原文'));
+    await user.click(screen.getByRole('button', { name: '保存并自动整理' }));
+    expect(await screen.findByText('已保存，等待重新整理')).toBeInTheDocument();
+
+    expect(fetchMock.mock.calls.filter(([path, init]) => path === '/api/cards' && init?.method === 'POST')).toHaveLength(1);
+    expect(fetchMock.mock.calls.some(([path, init]) => path === '/api/cards/card-1' && init?.method === 'PATCH')).toBe(false);
   });
 });
