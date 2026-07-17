@@ -931,3 +931,19 @@
 - `tests/frontend/entry-page.test.tsx`：新增重复提交、保存期间取消和整理完成后清空表单的回归测试。
 - `progress.md`：仅在文件末尾追加本轮状态机修正、验证证据、改动文件清单和回滚方式。
 - 回滚方式：在本修复提交仍为当前 `HEAD` 时执行 `git revert --no-edit HEAD`。
+
+## 2026-07-17 - Task: 补充录入保存状态机使用说明
+
+### What was done
+
+- 补充录入页 AI 状态行为说明，明确整理完成后清空新建表单和附件展示并保留成功提示，待整理和待完善时保持表单供同卡更新。
+
+### Testing
+
+- 文档差异检查：`git diff --check` 通过，仅输出既有 Windows 工作区的 LF/CRLF 转换提示。
+
+### Notes
+
+- `docs/本地运行与数据管理.md`：补充 `ready`、`pending` 和 `needs_input` 状态下的表单与附件展示行为。
+- `progress.md`：仅在文件末尾追加本轮文档修正、验证证据、改动文件清单和回滚方式。
+- 回滚方式：在本修复提交仍为当前 `HEAD` 时执行 `git revert --no-edit HEAD`。
