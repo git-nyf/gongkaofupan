@@ -963,8 +963,8 @@ a:focus-visible {
   width: 126px;
 }
 
-.cards-bulk label:nth-of-type(2) {
-  width: min(210px, 24vw);
+.cards-bulk__tags {
+  min-width: 210px;
 }
 
 .cards-bulk button {

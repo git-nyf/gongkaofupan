@@ -1120,3 +1120,28 @@
 - `docs/本地运行与数据管理.md`：同步录入页、卡片库、管理接口和不会标注只读累计值说明。
 - `progress.md`：仅在文件末尾追加本轮实现、验证证据、改动文件清单和回滚方式。
 - 回滚方式：在本任务提交仍为当前 `HEAD` 时执行 `git revert --no-edit HEAD`。
+
+## 2026-07-18 - Task: 清理卡片库旧筛选参数和批量标签布局
+
+### What was done
+
+- 卡片库直接打开含旧筛选参数的地址时，先以替换方式删除旧参数并保留其他有效查询条件，再发起唯一一次列表请求。
+- 批量标签容器改用稳定专用样式类并恢复 210 像素最小宽度，删除不再匹配当前结构的序号选择规则。
+
+### Testing
+
+- TDD 红灯：运行 `npx vitest run tests/frontend/cards-page.test.tsx`，十四项中十二项通过、两项按预期失败；失败分别证明旧地址身份触发重复请求、批量标签容器缺少专用样式类。
+- 卡片库定向测试：同一命令通过，一个测试文件共十四项全部通过。
+- 卡片库与录入页联合回归：`npx vitest run tests/frontend/entry-page.test.tsx tests/frontend/cards-page.test.tsx` 通过，两个测试文件共二十八项全部通过。
+- `npm test`：通过，十六个测试文件共二百五十七项全部通过。
+- `npm run typecheck`：通过，前端与服务端 TypeScript 配置均无类型错误。
+- `npm run build`：通过，前端和服务端构建成功；仅保留既有 Vite 单块超过 500 KB 提示。
+- `git diff --check`：通过，仅输出既有 Windows 工作区的 LF/CRLF 转换提示。
+
+### Notes
+
+- `src/pages/CardsPage.tsx`：增加旧筛选参数替换清理与请求门控，并为批量标签容器增加专用样式类。
+- `src/styles/global.css`：以批量标签专用类替换孤儿序号规则并恢复最小宽度。
+- `tests/frontend/cards-page.test.tsx`：补充地址栏清理、有效参数保留、单次请求和批量标签样式回归断言。
+- `progress.md`：仅在文件末尾追加本轮修复、验证证据、改动文件清单和回滚方式。
+- 回滚方式：在本修复提交仍为当前 `HEAD` 时执行 `git revert --no-edit HEAD`。

@@ -103,7 +103,9 @@ afterEach(() => {
 
 describe('卡片库筛选与状态', () => {
   it('从 URL 恢复现有筛选、忽略旧筛选并以重复键请求卡片列表', async () => {
-    const fetchMock = vi.mocked(fetch).mockResolvedValue(jsonResponse(searchResult([])));
+    const fetchMock = vi.mocked(fetch).mockResolvedValue(
+      jsonResponse({ items: [], total: 150, page: 3, pageSize: 50 }),
+    );
     renderAt(
       '/cards?query=广陵&categoryIds=常识判断&categoryIds=政治理论&tagIds=tag-a&tagIds=tag-b&rating=4&mastery=hard&aiStatus=needs_input&archived=true&createdFrom=2026-07-01&createdTo=2026-07-17&page=3&pageSize=50',
     );
@@ -119,6 +121,18 @@ describe('卡片库筛选与状态', () => {
     expect(screen.getByLabelText('录入结束日期')).toHaveValue('2026-07-17');
     expect(screen.getByLabelText('每页数量')).toHaveValue('50');
 
+    await waitFor(() => {
+      const currentParams = new URLSearchParams(window.location.search);
+      expect(currentParams.has('rating')).toBe(false);
+      expect(currentParams.has('mastery')).toBe(false);
+    });
+    const currentParams = new URLSearchParams(window.location.search);
+    expect(currentParams.get('query')).toBe('广陵');
+    expect(currentParams.getAll('categoryIds')).toEqual(['常识判断', '政治理论']);
+    expect(currentParams.getAll('tagIds')).toEqual(['tag-a', 'tag-b']);
+    expect(currentParams.get('aiStatus')).toBe('needs_input');
+    expect(currentParams.get('archived')).toBe('true');
+    expect(fetchMock).toHaveBeenCalledTimes(1);
     const requested = new URL(String(fetchMock.mock.calls[0]?.[0]), 'http://localhost');
     expect(requested.pathname).toBe('/api/cards');
     expect(requested.searchParams.get('query')).toBe('广陵');
@@ -310,7 +324,9 @@ describe('卡片库表格和管理操作', () => {
     await user.click(checkbox);
     expect(screen.queryByLabelText('批量星级')).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: '批量加星' })).not.toBeInTheDocument();
-    await user.type(screen.getByLabelText('批量标签'), ' 高频，冲刺 ');
+    const bulkTags = screen.getByLabelText('批量标签');
+    expect(bulkTags.closest('label')).toHaveClass('cards-bulk__tags');
+    await user.type(bulkTags, ' 高频，冲刺 ');
     await user.click(screen.getByRole('button', { name: '批量添加标签' }));
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3));
     expect(JSON.parse(String(requests[1]?.init?.body))).toEqual({ ids: ['card-1'], tags: ['高频', '冲刺'] });

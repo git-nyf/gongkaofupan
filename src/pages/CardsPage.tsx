@@ -42,6 +42,7 @@ const aiStatusLabels: Record<AiStatus, string> = {
 
 export function CardsPage() {
   const [searchParams, setSearchParams] = useSearchParams();
+  const hasDeprecatedFilters = searchParams.has('rating') || searchParams.has('mastery');
   const filters = useMemo(() => readFilters(searchParams), [searchParams]);
   const [queryDraft, setQueryDraft] = useState(filters.query);
   const [result, setResult] = useState<CardSearchResult>();
@@ -56,6 +57,14 @@ export function CardsPage() {
   const detailTrigger = useRef<HTMLButtonElement | null>(null);
 
   useEffect(() => {
+    if (!hasDeprecatedFilters) return;
+    const nextSearchParams = new URLSearchParams(searchParams);
+    nextSearchParams.delete('rating');
+    nextSearchParams.delete('mastery');
+    setSearchParams(nextSearchParams, { replace: true });
+  }, [hasDeprecatedFilters, searchParams, setSearchParams]);
+
+  useEffect(() => {
     setQueryDraft(filters.query);
   }, [filters.query]);
 
@@ -68,6 +77,7 @@ export function CardsPage() {
   }, [filters, queryDraft, setSearchParams]);
 
   useEffect(() => {
+    if (hasDeprecatedFilters) return;
     const version = ++requestVersion.current;
     const controller = new AbortController();
     setLoadState('loading');
@@ -91,7 +101,7 @@ export function CardsPage() {
       });
 
     return () => controller.abort();
-  }, [filters, reloadKey, setSearchParams]);
+  }, [filters, hasDeprecatedFilters, reloadKey, setSearchParams]);
 
   const setFilter = (patch: Partial<FilterState>) => {
     updateSearchParams(setSearchParams, filters, { ...patch, page: patch.page ?? 1 });
@@ -212,7 +222,7 @@ export function CardsPage() {
       {selected.size > 0 ? (
         <div className="cards-bulk" aria-label="批量操作">
           <strong>已选 {selected.size} 张</strong>
-          <label>
+          <label className="cards-bulk__tags">
             <span className="sr-only">批量标签</span>
             <input aria-label="批量标签" disabled={Boolean(actionName)} onChange={(event) => setBulkTags(event.target.value)} placeholder="逗号分隔标签" value={bulkTags} />
           </label>
