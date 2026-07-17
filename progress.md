@@ -617,3 +617,27 @@
 - `progress.md`：仅在文件末尾追加本轮实现、验证证据、改动文件清单和回滚方式。
 - `server/index.ts` 不在本任务授权范围内，本轮未修改；生产入口仍需创建统计服务，并把数据库 manager 与本机密钥作为设置依赖传入 `createApp` 后，新增接口才会在实际启动服务中装配。
 - 回滚方式：在本任务提交仍为当前 `HEAD` 时执行 `git revert --no-edit HEAD`。
+
+## 2026-07-17 - Task: 装配总览、复盘和设置生产入口
+
+### What was done
+
+- 在真实生产启动入口中使用现有数据库 manager 创建统计服务，并把统计服务、数据库 manager 和本机 DeepSeek 密钥配置传入应用工厂。
+- 保持现有启动顺序、数据库连接、卡片服务、复习服务和待整理重试行为不变，使总览、复盘和非敏感设置接口在 `npm start` 对应的生产服务中实际可访问。
+
+### Testing
+
+- 复用规范复审红灯：修正前构建并启动真实 `dist-server/index.js`，`GET /api/dashboard`、`GET /api/review-summary` 和 `GET /api/settings` 均返回 404，证明应用工厂已有路由但生产入口未装配依赖。
+- 首次烟测脚本因 Windows PowerShell 不支持所用的 `ProcessStartInfo.ArgumentList` 写法产生非终止脚本错误，该次结果作废且未作为验证证据；修正脚本为错误即停止并使用兼容的 `Arguments` 后重新执行。
+- 生产入口烟测：构建后使用独立端口、系统临时 `DATA_DIR` 和空 `DEEPSEEK_API_KEY` 启动真实 `dist-server/index.js`；健康检查、总览、复盘和设置接口均返回 200，总览与复盘返回空库统计，设置返回默认值且 `deepseekConfigured` 为 `false`，序列化响应不含密钥字段或片段；子进程退出且临时目录清理完成。
+- `npx vitest run tests/server/analytics.test.ts tests/server/settings.test.ts`：通过，两个专项文件共八项全部通过。
+- `npm test`：通过，十二个测试文件共一百六十二项全部通过，未访问真实网络。
+- `npm run typecheck`：通过，前端与服务端 TypeScript 配置均无类型错误。
+- `npm run build`：通过，成功生成包含生产入口装配的前端与服务端构建产物。
+- `git diff --check`：通过，未发现空白格式错误；仅输出既有 Windows 工作区的 LF/CRLF 转换提示。
+
+### Notes
+
+- `server/index.ts`：新增统计服务实例，并在现有应用创建调用中传入统计服务和非敏感设置依赖；该跨原任务文件改动用于修复真实生产入口不可用问题。
+- `progress.md`：仅在文件末尾追加本轮修正、验证证据、改动文件清单和回滚方式。
+- 回滚方式：在本修正提交仍为当前 `HEAD` 时执行 `git revert --no-edit HEAD`。

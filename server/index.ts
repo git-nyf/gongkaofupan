@@ -3,6 +3,7 @@ import { mkdirSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { createApp } from './app';
 import { createDeepSeekProvider, hasConfiguredDeepSeekApiKey } from './ai/deepseek';
+import { createAnalyticsService } from './analytics/service';
 import { createCardService } from './cards/service';
 import { readConfig } from './config';
 import { createDatabaseManager } from './db/database';
@@ -25,7 +26,17 @@ const cardService = createCardService({
 });
 cardService.recoverStaleProcessing(new Date());
 const studyService = createStudyService({ database: databaseManager });
-const app = createApp({ cardService, studyService, uploadsDirectory });
+const analyticsService = createAnalyticsService({ database: databaseManager });
+const app = createApp({
+  cardService,
+  studyService,
+  analyticsService,
+  settings: {
+    database: databaseManager,
+    deepseekApiKey: config.deepseek.apiKey,
+  },
+  uploadsDirectory,
+});
 
 app.listen(config.port, '127.0.0.1', () => {
   console.log(`Server listening on http://127.0.0.1:${config.port}`);
