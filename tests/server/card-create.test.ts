@@ -9,6 +9,7 @@ import type {
   CreateCardInput,
   NormalizeCardInput,
   NormalizedCard,
+  OriginalCardRewriteInput,
 } from '../../shared/contracts';
 import { createTestDatabase } from '../helpers/testDatabase';
 
@@ -43,8 +44,6 @@ const baseInput: CreateCardInput = {
   template: '常识判断',
   sourceType: 'unknown',
   sourceDetail: '',
-  rating: 3,
-  initialMastery: 'unseen',
   attachments: [],
 };
 
@@ -66,6 +65,29 @@ function normalized(overrides: Partial<NormalizedCard> = {}): NormalizedCard {
     ...baseNormalized,
     tags: [...baseNormalized.tags],
     quiz_items: baseNormalized.quiz_items.map((item) => ({ ...item })),
+    ...overrides,
+  };
+}
+
+function originalRewriteInput(
+  overrides: Partial<OriginalCardRewriteInput> = {},
+): OriginalCardRewriteInput {
+  return {
+    rawInput: '新的用户初始稿',
+    rawContentJson: JSON.stringify({
+      type: 'doc',
+      content: [{ type: 'paragraph', content: [{ type: 'text', text: '新的用户初始稿' }] }],
+    }),
+    wrongPoint: '新易错点',
+    analysis: '新解析',
+    mnemonic: '新口诀',
+    extension: '新拓展',
+    notes: '新笔记',
+    categoryIds: ['政治理论', '政治理论/马原'],
+    userTags: ['新版标签'],
+    template: '政治理论',
+    sourceType: '教材',
+    sourceDetail: '2026 新版',
     ...overrides,
   };
 }
@@ -159,7 +181,6 @@ describe('卡片自动整理服务', () => {
       input({
         wrongPoint: '易混地名',
         userTags: [' 用户标签 '],
-        initialMastery: 'hard',
         attachments: [
           {
             id: 'attachment-1',
@@ -179,8 +200,8 @@ describe('卡片自动整理服务', () => {
     expect(
       database.db.prepare('SELECT mastery, created_at, due_at FROM quiz_items ORDER BY direction').all(),
     ).toEqual([
-      { mastery: 'hard', created_at: now.toISOString(), due_at: now.toISOString() },
-      { mastery: 'hard', created_at: now.toISOString(), due_at: now.toISOString() },
+      { mastery: 'unseen', created_at: now.toISOString(), due_at: now.toISOString() },
+      { mastery: 'unseen', created_at: now.toISOString(), due_at: now.toISOString() },
     ]);
     expect(normalize).toHaveBeenCalledTimes(1);
   });
@@ -227,6 +248,95 @@ describe('卡片自动整理服务', () => {
     expect(detail.aiStatus).toBe('needs_input');
     expect(detail.normalizedStatement).toBe('广陵，扬州');
     expect(detail.quizItems).toEqual([]);
+  });
+
+  it('AI 返回多个单向题面时拆成多张独立可背诵卡片', async () => {
+    const multiQuestion = normalized({
+      normalized_statement: '年均增长率速算表',
+      question_type: 'single',
+      analysis: '原文给出多个速算对应值。',
+      tags: ['年均增长率', '速算表'],
+      quiz_items: [
+        { direction: 'single', question: '5% 对应多少？', answer: '1.215' },
+        { direction: 'single', question: '10% 对应多少？', answer: '1.46' },
+        { direction: 'single', question: '15% 对应多少？', answer: '1.75' },
+      ],
+    });
+    const { database, service } = setup([multiQuestion]);
+
+    const detail = await service.create(input({ userTags: ['资料速记'], rawInput: '5%=1.215；10%=1.46；15%=1.75' }));
+
+    expect(detail.aiStatus).toBe('ready');
+    expect(detail.quizItems).toEqual([
+      expect.objectContaining({ direction: 'single', question: '5% 对应多少？', answer: '1.215' }),
+    ]);
+    expect(database.db.prepare('SELECT COUNT(*) AS count FROM cards').get()).toEqual({ count: 3 });
+    expect(database.db.prepare('SELECT COUNT(*) AS count FROM quiz_items').get()).toEqual({ count: 3 });
+    const cardTitles = (
+      database.db.prepare('SELECT normalized_statement FROM cards').all() as Array<{
+        normalized_statement: string;
+      }>
+    ).map(({ normalized_statement }) => normalized_statement);
+    expect(cardTitles).toContain('5% 对应多少？');
+    expect(cardTitles).toContain('10% 对应多少？');
+    expect(cardTitles).toContain('15% 对应多少？');
+    expect(
+      database.db
+        .prepare(`
+          SELECT cards.id, COUNT(quiz_items.id) AS count
+          FROM cards
+          LEFT JOIN quiz_items ON quiz_items.card_id = cards.id
+          GROUP BY cards.id
+          ORDER BY cards.created_at, cards.id
+        `)
+        .all(),
+    ).toEqual([
+      expect.objectContaining({ count: 1 }),
+      expect.objectContaining({ count: 1 }),
+      expect.objectContaining({ count: 1 }),
+    ]);
+    expect(
+      database.db
+        .prepare(`
+          SELECT quiz_items.question, quiz_items.answer
+          FROM quiz_items
+          ORDER BY quiz_items.answer
+        `)
+        .all(),
+    ).toEqual([
+      { question: '5% 对应多少？', answer: '1.215' },
+      { question: '10% 对应多少？', answer: '1.46' },
+      { question: '15% 对应多少？', answer: '1.75' },
+    ]);
+    expect(
+      database.db
+        .prepare(`
+          SELECT cards.id, COUNT(card_categories.category_id) AS count
+          FROM cards
+          JOIN card_categories ON card_categories.card_id = cards.id
+          GROUP BY cards.id
+        `)
+        .all(),
+    ).toEqual([
+      expect.objectContaining({ count: 2 }),
+      expect.objectContaining({ count: 2 }),
+      expect.objectContaining({ count: 2 }),
+    ]);
+    expect(
+      database.db
+        .prepare(`
+          SELECT tags.name, COUNT(*) AS count
+          FROM card_tags
+          JOIN tags ON tags.id = card_tags.tag_id
+          GROUP BY tags.name
+          ORDER BY tags.name
+        `)
+        .all(),
+    ).toEqual([
+      { name: '年均增长率', count: 3 },
+      { name: '资料速记', count: 3 },
+      { name: '速算表', count: 3 },
+    ]);
   });
 
   it.each([
@@ -478,6 +588,268 @@ describe('卡片创建与重试接口', () => {
     expect(retried.body.quizItems).toHaveLength(2);
   });
 
+  it('编辑用户初始稿后用新问题整组替换旧衍生卡片', async () => {
+    const oldQuestions = normalized({
+      normalized_statement: '旧初始稿',
+      question_type: 'single',
+      tags: ['旧AI标签'],
+      quiz_items: [
+        { direction: 'single', question: '旧问题一？', answer: '旧答案一' },
+        { direction: 'single', question: '旧问题二？', answer: '旧答案二' },
+        { direction: 'single', question: '旧问题三？', answer: '旧答案三' },
+      ],
+    });
+    const newQuestions = normalized({
+      normalized_statement: '新初始稿',
+      question_type: 'single',
+      wrong_point: '',
+      analysis: '',
+      mnemonic: '',
+      extension: '',
+      notes: '',
+      tags: ['新AI标签'],
+      quiz_items: [
+        { direction: 'single', question: '新问题一？', answer: '新答案一' },
+        { direction: 'single', question: '新问题二？', answer: '新答案二' },
+      ],
+    });
+    const { app, database, service } = setup([oldQuestions, newQuestions]);
+    const created = await service.create(input({
+      rawInput: '旧的用户初始稿',
+      userTags: ['旧版标签'],
+      attachments: [{
+        id: 'attachment-original-rewrite',
+        storedName: 'original-rewrite.png',
+        originalName: '初始稿图片.png',
+        mimeType: 'image/png',
+        byteSize: 128,
+      }],
+    }));
+    expect(database.db.prepare('SELECT COUNT(*) AS count FROM cards').get()).toEqual({ count: 3 });
+    database.db.prepare('UPDATE cards SET manual_order = -27 WHERE raw_input = ?').run('旧的用户初始稿');
+
+    const rewriteBody = originalRewriteInput();
+    const response = await request(app)
+      .put(`/api/cards/${created.id}/original`)
+      .send(rewriteBody);
+
+    expect(response.status).toBe(200);
+    expect(response.body).toMatchObject({
+      derivedCount: 2,
+      card: {
+        id: created.id,
+        rawInput: rewriteBody.rawInput,
+        rawContentJson: rewriteBody.rawContentJson,
+        wrongPoint: rewriteBody.wrongPoint,
+        analysis: rewriteBody.analysis,
+        mnemonic: rewriteBody.mnemonic,
+        extension: rewriteBody.extension,
+        notes: rewriteBody.notes,
+        template: rewriteBody.template,
+        sourceType: rewriteBody.sourceType,
+        sourceDetail: rewriteBody.sourceDetail,
+        aiStatus: 'ready',
+      },
+    });
+    expect(database.db.prepare('SELECT COUNT(*) AS count FROM cards').get()).toEqual({ count: 2 });
+    expect(database.db.prepare('SELECT COUNT(*) AS count FROM quiz_items').get()).toEqual({ count: 2 });
+    expect(database.db.prepare('SELECT manual_order FROM cards ORDER BY id').all()).toEqual([
+      { manual_order: -27 },
+      { manual_order: -27 },
+    ]);
+    expect(
+      database.db.prepare('SELECT DISTINCT raw_input FROM cards').all(),
+    ).toEqual([{ raw_input: rewriteBody.rawInput }]);
+    expect(
+      database.db.prepare('SELECT question, answer FROM quiz_items ORDER BY question').all(),
+    ).toEqual([
+      { question: '新问题一？', answer: '新答案一' },
+      { question: '新问题二？', answer: '新答案二' },
+    ]);
+    expect(
+      database.db.prepare(`
+        SELECT category_id, COUNT(*) AS count
+        FROM card_categories
+        GROUP BY category_id
+        ORDER BY category_id
+      `).all(),
+    ).toEqual([
+      { category_id: '政治理论', count: 2 },
+      { category_id: '政治理论/马原', count: 2 },
+    ]);
+    expect(
+      database.db.prepare(`
+        SELECT tags.name, card_tags.origin, COUNT(*) AS count
+        FROM card_tags
+        JOIN tags ON tags.id = card_tags.tag_id
+        GROUP BY tags.name, card_tags.origin
+        ORDER BY tags.name
+      `).all(),
+    ).toEqual([
+      { name: '新AI标签', origin: 'ai', count: 2 },
+      { name: '新版标签', origin: 'user', count: 2 },
+    ]);
+    expect(
+      database.db.prepare('SELECT card_id, stored_name FROM attachments').all(),
+    ).toEqual([{ card_id: created.id, stored_name: 'original-rewrite.png' }]);
+  });
+
+  it('重写未归档初始稿时不被同原文已归档卡片阻断或计入衍生数', async () => {
+    const oldQuestions = normalized({
+      question_type: 'single',
+      quiz_items: [
+        { direction: 'single', question: '未归档旧问题一？', answer: '旧答案一' },
+        { direction: 'single', question: '未归档旧问题二？', answer: '旧答案二' },
+      ],
+    });
+    const archivedQuestion = normalized({
+      normalized_statement: '已归档同文卡片',
+      question_type: 'single',
+      quiz_items: [{ direction: 'single', question: '已归档问题？', answer: '已归档答案' }],
+    });
+    const newQuestions = normalized({
+      question_type: 'single',
+      quiz_items: [
+        { direction: 'single', question: '新问题一？', answer: '新答案一' },
+        { direction: 'single', question: '新问题二？', answer: '新答案二' },
+      ],
+    });
+    const { app, database, service } = setup([oldQuestions, archivedQuestion, newQuestions]);
+    const sameRawInput = '未归档与已归档都使用的初始稿';
+    const active = await service.create(input({ rawInput: sameRawInput }));
+    const archived = await service.create(input({ rawInput: sameRawInput }));
+    database.db.prepare('UPDATE cards SET archived = 1 WHERE id = ?').run(archived.id);
+
+    const response = await request(app)
+      .put(`/api/cards/${active.id}/original`)
+      .send(originalRewriteInput());
+
+    expect(response.status).toBe(200);
+    expect(response.body.derivedCount).toBe(2);
+    expect(
+      database.db.prepare('SELECT id, archived, raw_input FROM cards ORDER BY archived, id').all(),
+    ).toEqual(expect.arrayContaining([
+      expect.objectContaining({ archived: 0, raw_input: '新的用户初始稿' }),
+      expect.objectContaining({ archived: 0, raw_input: '新的用户初始稿' }),
+      { id: archived.id, archived: 1, raw_input: sameRawInput },
+    ]));
+    expect(database.db.prepare('SELECT COUNT(*) AS count FROM cards').get()).toEqual({ count: 3 });
+    expect(
+      database.db.prepare('SELECT normalized_statement FROM cards WHERE id = ?').get(archived.id),
+    ).toEqual({ normalized_statement: '已归档同文卡片' });
+  });
+
+  it('用户初始稿重新衍生失败时保留一张已更新的 pending 卡片', async () => {
+    const oldQuestions = normalized({
+      question_type: 'single',
+      quiz_items: [
+        { direction: 'single', question: '旧问题一？', answer: '旧答案一' },
+        { direction: 'single', question: '旧问题二？', answer: '旧答案二' },
+      ],
+    });
+    const { app, database, service } = setup([oldQuestions, new Error('临时不可用')]);
+    const created = await service.create(input({ rawInput: '旧的用户初始稿' }));
+
+    const rewriteBody = originalRewriteInput({ rawInput: '失败时也要保留的新初始稿' });
+    const response = await request(app)
+      .put(`/api/cards/${created.id}/original`)
+      .send(rewriteBody);
+
+    expect(response.status).toBe(200);
+    expect(response.body.card).toMatchObject({
+      id: created.id,
+      rawInput: rewriteBody.rawInput,
+      aiStatus: 'pending',
+      quizItems: [],
+    });
+    expect(database.db.prepare('SELECT COUNT(*) AS count FROM cards').get()).toEqual({ count: 1 });
+    expect(database.db.prepare('SELECT COUNT(*) AS count FROM quiz_items').get()).toEqual({ count: 0 });
+    expect(
+      database.db.prepare('SELECT raw_input, ai_status FROM cards').get(),
+    ).toEqual({ raw_input: rewriteBody.rawInput, ai_status: 'pending' });
+  });
+
+  it('通过接口手动修正已整理题面和答案且保留复习调度字段', async () => {
+    const { app, database } = setup([normalized()]);
+    const created = await request(app).post('/api/cards').send(input());
+    const firstQuizItem = created.body.quizItems[0];
+    const before = database.db
+      .prepare('SELECT due_at, mastery, stability, reps FROM quiz_items WHERE id = ?')
+      .get(firstQuizItem.id);
+
+    const updated = await request(app)
+      .patch(`/api/cards/${created.body.id}`)
+      .send({
+        quizItems: [
+          {
+            id: firstQuizItem.id,
+            question: '广陵现在对应哪座城市？',
+            answer: '扬州',
+          },
+        ],
+      });
+
+    expect(updated.status).toBe(200);
+    expect(updated.body.quizItems[0]).toMatchObject({
+      id: firstQuizItem.id,
+      question: '广陵现在对应哪座城市？',
+      answer: '扬州',
+    });
+    expect(
+      database.db
+        .prepare('SELECT question, answer FROM quiz_items WHERE id = ?')
+        .get(firstQuizItem.id),
+    ).toEqual({ question: '广陵现在对应哪座城市？', answer: '扬州' });
+    expect(
+      database.db
+        .prepare('SELECT due_at, mastery, stability, reps FROM quiz_items WHERE id = ?')
+        .get(firstQuizItem.id),
+    ).toEqual(before);
+  });
+
+  it.each([
+    ['空题目', (id: string) => ({ quizItems: [{ id, question: '   ', answer: '扬州' }] })],
+    ['空答案', (id: string) => ({ quizItems: [{ id, question: '广陵对应哪里？', answer: '   ' }] })],
+    ['重复题面编号', (id: string) => ({ quizItems: [
+      { id, question: '题目一', answer: '答案一' },
+      { id, question: '题目二', answer: '答案二' },
+    ] })],
+    ['不存在题面编号', () => ({ quizItems: [{ id: 'missing-quiz', question: '题目', answer: '答案' }] })],
+    ['额外题面字段', (id: string) => ({ quizItems: [{ id, question: '题目', answer: '答案', dueAt: now.toISOString() }] })],
+  ])('拒绝手动修正题面时的%s', async (_name, bodyFactory) => {
+    const { app } = setup([normalized()]);
+    const created = await request(app).post('/api/cards').send(input());
+    const firstQuizItem = created.body.quizItems[0];
+
+    const response = await request(app).patch(`/api/cards/${created.body.id}`).send(bodyFactory(firstQuizItem.id));
+
+    expect(response.status).toBe(400);
+    expect(response.body).toEqual({ code: 'invalid_request', message: '请求参数不合法' });
+  });
+
+  it('正在整理中的卡片拒绝手动修正题面', async () => {
+    const { app, database } = setup([normalized()]);
+    const created = await request(app).post('/api/cards').send(input());
+    const firstQuizItem = created.body.quizItems[0];
+    database.db.prepare("UPDATE cards SET ai_status = 'processing' WHERE id = ?").run(created.body.id);
+
+    const response = await request(app)
+      .patch(`/api/cards/${created.body.id}`)
+      .send({
+        quizItems: [
+          { id: firstQuizItem.id, question: '人工题目', answer: '人工答案' },
+        ],
+      });
+
+    expect(response.status).toBe(409);
+    expect(response.body).toEqual({ code: 'processing_conflict', message: '卡片正在整理，请稍后再编辑相关内容' });
+    expect(
+      database.db
+        .prepare('SELECT question, answer FROM quiz_items WHERE id = ?')
+        .get(firstQuizItem.id),
+    ).toEqual({ question: firstQuizItem.question, answer: firstQuizItem.answer });
+  });
+
   it.each([
     ['未知字段', { ...input(), unexpected: true }],
     ['空原文', { ...input(), rawInput: '   ' }],
@@ -485,8 +857,8 @@ describe('卡片创建与重试接口', () => {
     ['缺少一级分类', { ...input(), categoryIds: ['常识判断/文史'] }],
     ['缺少二级考点', { ...input(), categoryIds: ['常识判断'] }],
     ['错误录入模式', { ...input(), entryMode: 'other' }],
-    ['错误星级', { ...input(), rating: 6 }],
-    ['错误掌握度', { ...input(), initialMastery: 'mastered' }],
+    ['废弃星级字段', { ...input(), rating: 3 }],
+    ['废弃掌握度字段', { ...input(), initialMastery: 'unseen' }],
     [
       'HTTP 请求携带附件元数据',
       {
@@ -524,7 +896,7 @@ describe('卡片创建与重试接口', () => {
       .send({ unexpected: true });
 
     expect(invalidState.status).toBe(409);
-    expect(invalidState.body).toEqual({ code: 'invalid_state', message: '当前卡片状态不可重新整理' });
+    expect(invalidState.body).toEqual({ code: 'invalid_state', message: '当前卡片状态不允许此操作' });
     expect(notFound.status).toBe(404);
     expect(notFound.body).toEqual({ code: 'not_found', message: '卡片不存在' });
     expect(extraBody.status).toBe(400);

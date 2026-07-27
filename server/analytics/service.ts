@@ -50,7 +50,7 @@ export function createAnalyticsService({
         SELECT
           category.id AS category_id,
           category.name AS category_name,
-          SUM(CASE review.rating WHEN 'again' THEN 2 WHEN 'hard' THEN 1 ELSE 0 END) AS score,
+          COUNT(review.id) AS score,
           COUNT(DISTINCT review.card_id) AS card_count
         FROM review_logs review
         INNER JOIN cards card ON card.id = review.card_id
@@ -58,7 +58,7 @@ export function createAnalyticsService({
         INNER JOIN categories category ON category.id = relation.category_id
         WHERE card.archived = 0
           AND category.parent_id IS NULL
-          AND review.rating IN ('again', 'hard')
+          AND review.rating = 'again'
         GROUP BY category.id, category.name
         ORDER BY score DESC, category.name ASC, category.id ASC
       `)
@@ -101,7 +101,7 @@ export function createAnalyticsService({
         FROM cards
         WHERE archived = 0
           AND ai_status = 'ready'
-          AND mastery IN ('again', 'hard')
+          AND wrong_count > 0
       `)
       .get() as CountRow;
 
@@ -123,13 +123,13 @@ export function createAnalyticsService({
             WHEN TRIM(card.normalized_statement) <> '' THEN card.normalized_statement
             ELSE card.raw_input
           END AS title,
-          COUNT(*) AS wrong_count,
-          MAX(review.reviewed_at) AS last_wrong_at
-        FROM review_logs review
-        INNER JOIN cards card ON card.id = review.card_id
-        WHERE card.archived = 0 AND review.rating = 'again'
-        GROUP BY card.id, card.normalized_statement, card.raw_input
-        ORDER BY wrong_count DESC, last_wrong_at DESC, card.id ASC
+          card.wrong_count,
+          COALESCE(MAX(review.reviewed_at), card.updated_at) AS last_wrong_at
+        FROM cards card
+        LEFT JOIN review_logs review ON review.card_id = card.id AND review.rating = 'again'
+        WHERE card.archived = 0 AND card.wrong_count > 0
+        GROUP BY card.id, card.normalized_statement, card.raw_input, card.wrong_count, card.updated_at
+        ORDER BY card.wrong_count DESC, last_wrong_at DESC, card.id ASC
       `)
       .all() as FrequentMistakeRow[];
 

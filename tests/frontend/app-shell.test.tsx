@@ -1,23 +1,33 @@
 // @vitest-environment jsdom
 
-import { cleanup, render, screen } from '@testing-library/react';
+import { readFileSync } from 'node:fs';
+import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { MemoryRouter } from 'react-router-dom';
 import App from '../../src/App';
 import { api, ApiError, apiForm } from '../../src/api/client';
+import { AppShell } from '../../src/components/AppShell';
 import { StatusNotice } from '../../src/components/StatusNotice';
+import { diyThemeStorageKey } from '../../src/theme/diyTheme';
+
+const appShellSource = readFileSync('src/components/AppShell.tsx', 'utf8');
+const appShellGlassCss = readFileSync('src/styles/app-shell-glass.css', 'utf8');
 
 const routes = [
-  { label: '总览', path: '/' },
-  { label: '录入', path: '/entry' },
-  { label: '背诵', path: '/study' },
-  { label: '卡片库', path: '/cards' },
-  { label: '复盘', path: '/review' },
-  { label: '设置', path: '/settings' },
+  { label: '总览', path: '/', heading: '总览' },
+  { label: '录入', path: '/entry', heading: '录入' },
+  { label: '背诵', path: '/study', heading: '背诵' },
+  { label: '卡片库', path: '/cards', heading: '卡片库' },
+  { label: '复盘', path: '/review', heading: '错题积累' },
+  { label: '设置', path: '/settings', heading: '设置' },
 ] as const;
 
 beforeEach(() => {
+  window.localStorage.clear();
   window.history.pushState({}, '', '/');
+  document.documentElement.removeAttribute('style');
+  document.documentElement.removeAttribute('data-motion');
 });
 
 afterEach(() => {
@@ -37,12 +47,12 @@ describe('桌面工作台', () => {
     }
   });
 
-  it.each(routes)('在 $path 显示$label页面', ({ label, path }) => {
+  it.each(routes)('在 $path 显示$heading页面', ({ heading, path }) => {
     window.history.pushState({}, '', path);
 
     render(<App />);
 
-    expect(screen.getByRole('heading', { level: 1, name: label })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { level: 1, name: heading })).toBeInTheDocument();
   });
 
   it('标记当前入口为激活状态', () => {
@@ -75,24 +85,221 @@ describe('桌面工作台', () => {
     expect(expandButton).toHaveAttribute('title', '展开侧栏');
     expect(expandButton).toHaveAttribute('aria-expanded', 'false');
     expect(expandButton).toHaveFocus();
-    expect(container.querySelector('.app-shell__brand-text')).not.toBeInTheDocument();
+    expect(container.querySelector('.app-shell__brand-copy')).not.toBeInTheDocument();
     for (const route of routes) {
       const link = screen.getByRole('link', { name: route.label });
       expect(link.querySelector('.app-shell__nav-label')).not.toBeInTheDocument();
     }
   });
 
-  it('侧栏折叠前后都保留品牌图标', async () => {
+  it('展示为人民服务品牌与国徽，并在侧栏折叠后仅保留国徽', async () => {
     const user = userEvent.setup();
     const { container } = render(<App />);
-    const brand = screen.getByRole('link', { name: '公考记忆卡' });
+    const brand = screen.getByRole('link', { name: '为人民服务 · 公考记忆卡' });
+    const emblem = screen.getByRole('img', { name: '中华人民共和国国徽' });
 
-    expect(brand.querySelector('.app-shell__brand-mark svg')).toBeInTheDocument();
+    expect(brand).toHaveAttribute('href', '/');
+    expect(emblem).toHaveAttribute('src', '/diy/国徽.jpg');
+    expect(emblem).toHaveClass('app-shell__brand-emblem');
+    expect(container.querySelector('.app-shell__brand-motto')).toHaveTextContent('为人民服务');
+    expect(container.querySelector('.app-shell__brand-product')).toHaveTextContent('公考记忆卡');
 
     await user.click(screen.getByRole('button', { name: '折叠侧栏' }));
 
-    expect(container.querySelector('.app-shell__brand-mark svg')).toBeInTheDocument();
-    expect(container.querySelector('.app-shell__brand-text')).not.toBeInTheDocument();
+    expect(screen.getByRole('img', { name: '中华人民共和国国徽' })).toHaveAttribute(
+      'src',
+      '/diy/国徽.jpg',
+    );
+    expect(container.querySelector('.app-shell__brand-copy')).not.toBeInTheDocument();
+    expect(container.querySelector('.app-shell__brand-motto')).not.toBeInTheDocument();
+    expect(container.querySelector('.app-shell__brand-product')).not.toBeInTheDocument();
+  });
+
+  it('从本地 DIY 主题恢复导航栏和右侧背景', () => {
+    window.localStorage.setItem(
+      diyThemeStorageKey,
+      JSON.stringify({ sidebarImage: 'guohui', mainImage: 'kaiguo-dadian', mainFade: 92 }),
+    );
+
+    render(<App />);
+
+    expect(document.documentElement.style.getPropertyValue('--diy-sidebar-background-image')).toContain(
+      '/diy/%E5%9B%BD%E5%BE%BD.jpg',
+    );
+    expect(document.documentElement.style.getPropertyValue('--diy-main-background-image')).toContain(
+      '/diy/%E5%BC%80%E5%9B%BD%E5%A4%A7%E5%85%B8.jpg',
+    );
+    expect(document.documentElement.style.getPropertyValue('--diy-main-overlay-alpha')).toBe('0.92');
+  });
+
+  it('从本地体验设置恢复全站减弱动效', () => {
+    window.localStorage.setItem(
+      'gongkao-experience-v1',
+      JSON.stringify({ version: 1, motionLevel: 'reduced' }),
+    );
+
+    render(<App />);
+
+    expect(document.documentElement).toHaveAttribute('data-motion', 'reduced');
+  });
+
+  it('在浏览器绘制前恢复主题和动效设置', () => {
+    expect(appShellSource).toMatch(
+      /useLayoutEffect\(\(\) => \{\s*applyDiyTheme\(readDiyTheme\(\)\);\s*applyMotionLevel\(readMotionLevel\(\)\);/,
+    );
+  });
+
+  it('用分层玻璃材质组织侧栏、内容区和即时按压控件', () => {
+    const { container } = render(<App />);
+
+    expect(container.querySelector('.app-shell__sidebar')).toHaveClass(
+      'liquid-glass',
+      'liquid-glass--dark',
+    );
+    expect(container.querySelector('.app-shell__main')).toHaveClass(
+      'liquid-glass',
+      'liquid-glass--regular',
+    );
+    expect(screen.getByRole('link', { name: '为人民服务 · 公考记忆卡' })).toHaveClass(
+      'liquid-pressable',
+    );
+    expect(screen.getByRole('link', { name: '总览' })).toHaveClass(
+      'app-shell__nav-link--active',
+      'liquid-glass__nested',
+      'liquid-pressable',
+    );
+    expect(screen.getByRole('button', { name: '折叠侧栏' })).toHaveClass(
+      'liquid-glass__nested',
+      'liquid-pressable',
+    );
+  });
+
+  it('用单一指针委托合并高光更新，并在卸载时取消待执行帧', () => {
+    let frameCallback: FrameRequestCallback | undefined;
+    const requestFrame = vi
+      .fn<(callback: FrameRequestCallback) => number>()
+      .mockImplementation((callback) => {
+        frameCallback = callback;
+        return 37;
+      });
+    const cancelFrame = vi.fn();
+    vi.stubGlobal('requestAnimationFrame', requestFrame);
+    vi.stubGlobal('cancelAnimationFrame', cancelFrame);
+    const addEventListener = vi.spyOn(document, 'addEventListener');
+    const removeEventListener = vi.spyOn(document, 'removeEventListener');
+
+    const { container, unmount } = render(
+      <MemoryRouter>
+        <AppShell>
+          <div>页面内容</div>
+        </AppShell>
+      </MemoryRouter>,
+    );
+    const sidebar = container.querySelector<HTMLElement>('.app-shell__sidebar');
+    const navLink = screen.getByRole('link', { name: '总览' });
+    expect(sidebar).not.toBeNull();
+    vi.spyOn(sidebar!, 'getBoundingClientRect').mockReturnValue({
+      bottom: 220,
+      height: 200,
+      left: 10,
+      right: 110,
+      top: 20,
+      width: 100,
+      x: 10,
+      y: 20,
+      toJSON: () => ({}),
+    });
+
+    fireEvent(
+      navLink,
+      new MouseEvent('pointermove', { bubbles: true, clientX: 30, clientY: 60 }),
+    );
+    fireEvent(
+      navLink,
+      new MouseEvent('pointermove', { bubbles: true, clientX: 90, clientY: 100 }),
+    );
+
+    expect(addEventListener.mock.calls.filter(([type]) => type === 'pointermove')).toHaveLength(1);
+    expect(requestFrame).toHaveBeenCalledTimes(1);
+    frameCallback?.(0);
+    expect(sidebar).toHaveStyle({
+      '--glass-pointer-x': '80%',
+      '--glass-pointer-y': '40%',
+    });
+
+    fireEvent(
+      navLink,
+      new MouseEvent('pointermove', { bubbles: true, clientX: 50, clientY: 70 }),
+    );
+    unmount();
+
+    expect(cancelFrame).toHaveBeenCalledWith(37);
+    expect(removeEventListener.mock.calls.filter(([type]) => type === 'pointermove')).toHaveLength(1);
+  });
+
+  it('降透明度和能力回退保留 DIY 图层，高对比提供明确分界', () => {
+    const reducedStart = appShellGlassCss.indexOf(
+      '@media (prefers-reduced-transparency: reduce)',
+    );
+    const contrastStart = appShellGlassCss.indexOf('@media (prefers-contrast: more)');
+    const fallbackStart = appShellGlassCss.indexOf('@supports not');
+    expect(reducedStart).toBeGreaterThan(-1);
+    expect(contrastStart).toBeGreaterThan(reducedStart);
+    expect(fallbackStart).toBeGreaterThan(contrastStart);
+
+    const reducedTransparency = appShellGlassCss.slice(reducedStart, contrastStart);
+    const highContrast = appShellGlassCss.slice(contrastStart, fallbackStart);
+    const unsupportedBackdropFilter = appShellGlassCss.slice(fallbackStart);
+
+    expect(reducedTransparency).not.toMatch(/\bbackground\s*:/);
+    expect(unsupportedBackdropFilter).not.toMatch(/\bbackground\s*:/);
+    expect(reducedTransparency).toContain('background-color: var(--glass-solid-dark)');
+    expect(reducedTransparency).toContain('background-color: var(--glass-solid)');
+    expect(unsupportedBackdropFilter).toContain('background-color: var(--glass-solid-dark)');
+    expect(unsupportedBackdropFilter).toContain('background-color: var(--glass-solid)');
+    expect(highContrast).toMatch(
+      /\.app-shell__sidebar\.liquid-glass\s*\{[^}]*border-right:\s*2px solid/,
+    );
+    expect(highContrast).toMatch(
+      /\.app-shell__main\.liquid-glass\s*\{[^}]*border:\s*1px solid/,
+    );
+  });
+
+  it('设置页可选择、保存和恢复默认 DIY 主题', async () => {
+    window.history.pushState({}, '', '/settings');
+    const user = userEvent.setup();
+    render(<App />);
+
+    expect(screen.getByRole('heading', { name: '设置' })).toBeInTheDocument();
+    expect(screen.getAllByRole('radio', { name: '人民英雄' })).toHaveLength(2);
+    expect(screen.getAllByRole('radio', { name: '国徽' })).toHaveLength(2);
+    expect(screen.getAllByRole('radio', { name: '开国大典' })).toHaveLength(2);
+
+    await user.click(screen.getAllByRole('radio', { name: '人民英雄' })[0]);
+    await user.click(screen.getAllByRole('radio', { name: '开国大典' })[1]);
+    fireEvent.change(screen.getByRole('slider', { name: /^右侧背景淡化强度/ }), {
+      target: { value: '90' },
+    });
+
+    expect(document.documentElement.style.getPropertyValue('--diy-sidebar-background-image')).toContain(
+      '/diy/%E4%BA%BA%E6%B0%91%E8%8B%B1%E9%9B%84.jpg',
+    );
+    expect(document.documentElement.style.getPropertyValue('--diy-main-background-image')).toContain(
+      '/diy/%E5%BC%80%E5%9B%BD%E5%A4%A7%E5%85%B8.jpg',
+    );
+
+    await user.click(screen.getByRole('button', { name: '保存主题' }));
+    expect(screen.getByRole('status')).toHaveTextContent('DIY 主题已保存');
+    expect(JSON.parse(window.localStorage.getItem(diyThemeStorageKey) ?? '{}')).toMatchObject({
+      sidebarImage: 'renmin-yingxiong',
+      mainImage: 'kaiguo-dadian',
+    });
+
+    await user.click(screen.getByRole('button', { name: '恢复默认' }));
+    expect(screen.getByRole('status')).toHaveTextContent('已恢复默认主题');
+    expect(window.localStorage.getItem(diyThemeStorageKey)).toBeNull();
+    expect(document.documentElement.style.getPropertyValue('--diy-sidebar-background-image')).toBe('none');
+    expect(document.documentElement.style.getPropertyValue('--diy-main-background-image')).toBe('none');
   });
 });
 

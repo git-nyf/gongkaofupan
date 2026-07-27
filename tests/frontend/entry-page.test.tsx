@@ -1,11 +1,18 @@
 // @vitest-environment jsdom
 
-import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
+import { act, cleanup, createEvent, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { CardDetail } from '../../shared/contracts';
 import App from '../../src/App';
 import { EntryPage } from '../../src/pages/EntryPage';
+
+const entryGlassCss = readFileSync(
+  resolve(process.cwd(), 'src/styles/entry-glass.css'),
+  'utf8',
+);
 
 const templateExpectations = [
   {
@@ -96,8 +103,6 @@ function card(overrides: Partial<CardDetail> = {}): CardDetail {
     aiStatus: 'ready',
     sourceType: '历年真题',
     sourceDetail: '2025 国考',
-    rating: 4,
-    mastery: 'hard',
     wrongCount: 0,
     archived: false,
     createdAt: '2026-07-17T00:00:00.000Z',
@@ -113,8 +118,15 @@ function card(overrides: Partial<CardDetail> = {}): CardDetail {
   };
 }
 
-function jsonResponse(body: CardDetail, status = 200) {
+function jsonResponse(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), {
+    status,
+    headers: { 'Content-Type': 'application/json' },
+  });
+}
+
+function apiErrorResponse(code: string, message: string, status = 400) {
+  return new Response(JSON.stringify({ code, message }), {
     status,
     headers: { 'Content-Type': 'application/json' },
   });
@@ -171,6 +183,103 @@ describe('七套录入模板', () => {
 });
 
 describe('录入表单', () => {
+  it('按层级呈现液态玻璃并为普通按钮提供即时按压反馈', () => {
+    render(<EntryPage />);
+
+    const form = screen.getByRole('form', { name: '录入卡片表单' });
+    expect(form).toHaveClass('liquid-glass', 'liquid-glass--regular');
+    expect(screen.getByRole('textbox', { name: '原始内容' }).closest('.entry-content')).toHaveClass(
+      'liquid-glass',
+      'liquid-glass--regular',
+    );
+    expect(screen.getByRole('complementary', { name: '卡片属性' })).toHaveClass(
+      'liquid-glass',
+      'liquid-glass--regular',
+    );
+    expect(screen.getByRole('group', { name: '图片拖放与粘贴区域' })).toHaveClass(
+      'liquid-glass',
+      'liquid-glass--regular',
+    );
+    expect(screen.getByRole('combobox', { name: '模板' })).toHaveClass(
+      'liquid-glass--thin',
+      'liquid-glass__nested',
+    );
+    expect(screen.getByRole('toolbar', { name: '快捷编辑' })).toHaveClass(
+      'liquid-glass--thin',
+      'liquid-glass__nested',
+    );
+    expect(screen.getByRole('button', { name: '取消' })).toHaveClass('liquid-pressable');
+    expect(screen.getByRole('button', { name: '保存并自动整理' })).toHaveClass(
+      'liquid-glass--thin',
+      'liquid-pressable',
+    );
+  });
+
+  it('隐藏录入模式选择并为一二级分类标签统一提供按压反馈', async () => {
+    const user = userEvent.setup();
+    render(<EntryPage />);
+
+    expect(screen.queryByRole('radio')).not.toBeInTheDocument();
+    expect(screen.queryByText('错题录入')).not.toBeInTheDocument();
+    expect(screen.queryByText('知识点积累')).not.toBeInTheDocument();
+    for (const checkbox of screen.getAllByRole('checkbox')) {
+      expect(checkbox.closest('label')).toHaveClass('liquid-pressable');
+    }
+
+    await user.click(screen.getByRole('checkbox', { name: '常识判断' }));
+    for (const checkbox of screen.getAllByRole('checkbox')) {
+      expect(checkbox.closest('label')).toHaveClass('liquid-pressable');
+    }
+  });
+
+  it('只暴露一个真实图片选择按钮并移除无动作拖放区焦点', async () => {
+    const user = userEvent.setup();
+    render(<EntryPage />);
+
+    const dropzone = screen.getByRole('group', { name: '图片拖放与粘贴区域' });
+    const picker = screen.getByRole('button', { name: '选择本地图片' });
+    const input = screen.getByLabelText('图片', { selector: 'input' });
+    const inputClick = vi.spyOn(input, 'click');
+
+    expect(dropzone).not.toHaveAttribute('tabindex');
+    expect(screen.getAllByRole('button', { name: '选择本地图片' })).toHaveLength(1);
+    expect(picker.tagName).toBe('BUTTON');
+    expect(picker).toHaveAttribute('type', 'button');
+    expect(picker).toHaveAttribute('tabindex', '0');
+    expect(input).toHaveAttribute('tabindex', '-1');
+    expect(input).toHaveAttribute('aria-hidden', 'true');
+    expect(input).toHaveAttribute('hidden');
+    picker.focus();
+    expect(picker).toHaveFocus();
+
+    await user.keyboard('{Enter}');
+    expect(inputClick).toHaveBeenCalledTimes(1);
+  });
+
+  it('用页面专属样式保证小屏工具可达、44px 触控和半透明布局', () => {
+    expect(entryGlassCss).toMatch(
+      /\.entry-page \.rich-text-editor__toolbar\s*{[^}]*overflow-x:\s*auto;/s,
+    );
+    expect(entryGlassCss).toMatch(
+      /\.entry-page \.entry-page__actions \.entry-page__save\.button--primary\s*{[^}]*background:\s*rgba\(198, 66, 50, 0\.94\);[^}]*color:\s*#ffffff;/s,
+    );
+    expect(entryGlassCss).toMatch(
+      /\.entry-page \.entry-page__actions \.entry-page__save\.button--primary:disabled\s*{[^}]*background:\s*rgba\(248, 224, 220, 0\.9\);[^}]*color:\s*#7a2f27;[^}]*opacity:\s*1;/s,
+    );
+    expect(entryGlassCss).toMatch(
+      /\.entry-page \.entry-recommended-tags button\s*{[^}]*min-height:\s*44px;/s,
+    );
+    expect(entryGlassCss).toMatch(
+      /\.entry-page \.entry-layout\s*{[^}]*background:\s*rgba\([^)]+\);/s,
+    );
+    expect(entryGlassCss).toMatch(
+      /\.entry-page \.entry-images__picker:focus-visible\s*{[^}]*outline:/s,
+    );
+    expect(entryGlassCss).toMatch(
+      /@media \(max-width: 900px\)[\s\S]*?\.entry-page \.entry-layout\s*{[^}]*grid-template-columns:\s*minmax\(0, 1fr\);/,
+    );
+  });
+
   it('在应用外壳内只保留一个 main 地标', () => {
     window.history.pushState({}, '', '/entry');
 
@@ -179,11 +288,12 @@ describe('录入表单', () => {
     expect(screen.getAllByRole('main')).toHaveLength(1);
   });
 
-  it('呈现两种模式、五个可选内容字段和录入所需属性字段', () => {
+  it('不呈现录入模式选择，并保留五个可选内容字段和录入所需属性字段', () => {
     render(<EntryPage />);
 
-    expect(screen.getByRole('radio', { name: '错题录入' })).toBeChecked();
-    expect(screen.getByRole('radio', { name: '知识点积累' })).toBeInTheDocument();
+    expect(screen.queryByRole('radio')).not.toBeInTheDocument();
+    expect(screen.queryByText('错题录入')).not.toBeInTheDocument();
+    expect(screen.queryByText('知识点积累')).not.toBeInTheDocument();
     for (const label of ['错误选项或易错点', '正确解析', '记忆速记口诀', '同类拓展知识点', '补充笔记']) {
       expect(screen.getByRole('textbox', { name: label })).toBeInTheDocument();
     }
@@ -205,19 +315,88 @@ describe('录入表单', () => {
     expect(screen.getByText('请选择至少一个所属板块')).toBeInTheDocument();
     expect(screen.getByText('请选择至少一个细分考点')).toBeInTheDocument();
     expect(screen.getByText('请输入原始内容')).toBeInTheDocument();
+    expect(screen.getByRole('alert')).toHaveTextContent('请先补全必填内容后再保存');
     expect(fetch).not.toHaveBeenCalled();
   });
 
-  it('禁用编辑器历史记录，Ctrl+Z 不撤销已经输入的内容', async () => {
+  it('启用编辑器历史记录，Ctrl+Z 撤销当前输入', async () => {
     const user = userEvent.setup();
     render(<EntryPage />);
 
     const editor = screen.getByRole('textbox', { name: '原始内容' });
     await user.click(editor);
-    await user.keyboard('不可撤销内容');
+    await user.keyboard('可以撤销内容');
     await user.keyboard('{Control>}z{/Control}');
 
-    expect(editor).toHaveTextContent('不可撤销内容');
+    await waitFor(() => expect(editor.textContent).toBe(''));
+  });
+
+  it('快捷工具栏可操作当前普通文本域', async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    const readText = vi.fn().mockResolvedValue('补充内容');
+    const user = userEvent.setup();
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: { readText, writeText },
+    });
+    render(<EntryPage />);
+
+    const textarea = screen.getByRole('textbox', { name: '正确解析' }) as HTMLTextAreaElement;
+    fireEvent.change(textarea, { target: { value: '原有解析' } });
+    fireEvent.focus(textarea);
+    textarea.setSelectionRange(0, 2);
+    await user.click(screen.getByRole('button', { name: '复制当前编辑区' }));
+    expect(writeText).toHaveBeenCalledWith('原有');
+
+    await user.click(screen.getByRole('button', { name: '全选当前编辑区' }));
+    expect(textarea.selectionStart).toBe(0);
+    expect(textarea.selectionEnd).toBe(4);
+
+    await user.click(screen.getByRole('button', { name: '清空当前编辑区' }));
+    expect(textarea).toHaveValue('');
+    await user.click(screen.getByRole('button', { name: '撤销当前编辑区' }));
+    expect(textarea).toHaveValue('原有解析');
+
+    textarea.setSelectionRange(4, 4);
+    await user.click(screen.getByRole('button', { name: '粘贴到当前编辑区' }));
+    expect(readText).toHaveBeenCalledTimes(1);
+    expect(textarea).toHaveValue('原有解析补充内容');
+  });
+
+  it('剪贴板读取失败时保留内容并显示稳定提示', async () => {
+    const user = userEvent.setup();
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: { readText: vi.fn().mockRejectedValue(new DOMException('denied')) },
+    });
+    render(<EntryPage />);
+
+    const textarea = screen.getByRole('textbox', { name: '补充笔记' });
+    fireEvent.change(textarea, { target: { value: '原笔记' } });
+    fireEvent.focus(textarea);
+    await user.click(screen.getByRole('button', { name: '粘贴到当前编辑区' }));
+
+    expect(textarea).toHaveValue('原笔记');
+    expect(screen.getByRole('status')).toHaveTextContent('无法读取剪贴板，请使用 Ctrl/Cmd+V');
+    expect(screen.queryByText('denied')).not.toBeInTheDocument();
+  });
+
+  it('Ctrl+S 与 Cmd+Enter 复用保存入口且不拦截编辑原生组合键', async () => {
+    const fetchMock = vi.mocked(fetch).mockResolvedValue(jsonResponse(card(), 201));
+    const user = userEvent.setup();
+    render(<EntryPage />);
+    await chooseRequiredFields(user);
+
+    const textarea = screen.getByRole('textbox', { name: '补充笔记' });
+    for (const key of ['a', 'c', 'v', 'z']) {
+      expect(fireEvent.keyDown(textarea, { ctrlKey: true, key })).toBe(true);
+    }
+    expect(fireEvent.keyDown(textarea, { ctrlKey: true, key: 's' })).toBe(false);
+    expect(await screen.findByText('已生成 2 个背诵方向，可继续录入下一条')).toBeInTheDocument();
+
+    await chooseRequiredFields(user);
+    await user.keyboard('{Meta>}{Enter}{/Meta}');
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
   });
 
   it('只启用加粗、颜色和公式文本工具，并将富 HTML 粘贴为纯文本节点', async () => {
@@ -246,7 +425,7 @@ describe('录入表单', () => {
     await user.click(screen.getByRole('checkbox', { name: '常识判断' }));
     await user.click(screen.getByRole('checkbox', { name: '文史' }));
     await user.click(screen.getByRole('button', { name: '保存并自动整理' }));
-    await screen.findByText('已生成 2 个背诵方向');
+    await screen.findByText('已生成 2 个背诵方向，可继续录入下一条');
 
     const formData = fetchMock.mock.calls[0]?.[1]?.body as FormData;
     const payload = JSON.parse(String(formData.get('payload')));
@@ -261,7 +440,6 @@ describe('录入表单', () => {
     render(<EntryPage />);
     await chooseRequiredFields(user);
 
-    await user.click(screen.getByRole('radio', { name: '知识点积累' }));
     await user.selectOptions(screen.getByRole('combobox', { name: '模板' }), '常识判断');
     await user.click(screen.getByRole('checkbox', { name: '言语理解' }));
     await user.click(screen.getByRole('checkbox', { name: '逻辑填空' }));
@@ -283,7 +461,7 @@ describe('录入表单', () => {
 
     await user.click(screen.getByRole('button', { name: '保存并自动整理' }));
 
-    expect(await screen.findByText('已生成 2 个背诵方向')).toBeInTheDocument();
+    expect(await screen.findByText('已生成 2 个背诵方向，可继续录入下一条')).toBeInTheDocument();
     expect(screen.queryByRole('dialog', { name: '确认 AI 结果' })).not.toBeInTheDocument();
     expect(fetchMock).toHaveBeenCalledTimes(1);
     const [path, init] = fetchMock.mock.calls[0] as [string, RequestInit];
@@ -294,7 +472,7 @@ describe('录入表单', () => {
     expect(formData.getAll('image')).toEqual([kept]);
     const payload = JSON.parse(String(formData.get('payload')));
     expect(payload).toEqual({
-      entryMode: 'knowledge',
+      entryMode: 'mistake',
       rawInput: '广陵=扬州',
       rawContentJson: expect.any(String),
       wrongPoint: '混淆古今地名',
@@ -307,8 +485,6 @@ describe('录入表单', () => {
       template: '常识判断',
       sourceType: '历年真题',
       sourceDetail: '2025 国考',
-      rating: 1,
-      initialMastery: 'unseen',
       attachments: [],
     });
     expect(JSON.parse(payload.rawContentJson)).toMatchObject({ type: 'doc' });
@@ -316,8 +492,8 @@ describe('录入表单', () => {
 
   it.each([
     { status: 'pending' as const, message: '已保存，等待重新整理' },
-    { status: 'needs_input' as const, message: '已保存，需要补充关系后再整理' },
-  ])('为 $status 返回明确状态且不弹确认框', async ({ status, message }) => {
+    { status: 'needs_input' as const, message: '已保存，需要补充关系后再整理，可继续录入下一条' },
+  ])('为 $status 返回明确状态、清空新建表单且不弹确认框', async ({ status, message }) => {
     const user = userEvent.setup();
     vi.mocked(fetch).mockResolvedValue(jsonResponse(card({ aiStatus: status, quizItems: [] }), 201));
     render(<EntryPage />);
@@ -326,47 +502,41 @@ describe('录入表单', () => {
     await user.click(screen.getByRole('button', { name: '保存并自动整理' }));
 
     expect(await screen.findByText(message)).toBeInTheDocument();
+    expect(screen.getByRole('textbox', { name: '原始内容' })).toHaveTextContent('');
+    expect(screen.getByRole('checkbox', { name: '常识判断' })).not.toBeChecked();
+    expect(screen.queryByRole('checkbox', { name: '文史' })).not.toBeInTheDocument();
     expect(screen.queryByRole('dialog', { name: '确认 AI 结果' })).not.toBeInTheDocument();
   });
 
-  it('待完善补充原文后 PATCH 同一卡片并由后端自动重整', async () => {
+  it('待完善保存后清空表单，继续录入时创建下一张卡片', async () => {
     const user = userEvent.setup();
     const fetchMock = vi
       .mocked(fetch)
       .mockResolvedValueOnce(jsonResponse(card({ id: 'needs-card', aiStatus: 'needs_input', quizItems: [] }), 201))
-      .mockResolvedValueOnce(jsonResponse(card({ id: 'needs-card' })));
+      .mockResolvedValueOnce(jsonResponse(card({ id: 'next-card' }), 201));
     render(<EntryPage />);
     await chooseRequiredFields(user);
     await user.click(screen.getByRole('button', { name: '保存并自动整理' }));
-    expect(await screen.findByText('已保存，需要补充关系后再整理')).toBeInTheDocument();
+    expect(await screen.findByText('已保存，需要补充关系后再整理，可继续录入下一条')).toBeInTheDocument();
+    expect(screen.getByRole('textbox', { name: '原始内容' })).toHaveTextContent('');
 
+    await user.click(screen.getByRole('checkbox', { name: '常识判断' }));
+    await user.click(screen.getByRole('checkbox', { name: '文史' }));
     await user.click(screen.getByRole('textbox', { name: '原始内容' }));
-    await user.keyboard('，两者明确对应');
+    await user.keyboard('下一条知识点');
     await user.click(screen.getByRole('button', { name: '保存并自动整理' }));
 
-    expect(await screen.findByText('已生成 2 个背诵方向')).toBeInTheDocument();
+    expect(await screen.findByText('已生成 2 个背诵方向，可继续录入下一条')).toBeInTheDocument();
     expect(fetchMock).toHaveBeenCalledTimes(2);
     const [path, init] = fetchMock.mock.calls[1] as [string, RequestInit];
-    expect(path).toBe('/api/cards/needs-card');
-    expect(init.method).toBe('PATCH');
-    expect(JSON.parse(String(init.body))).toEqual({
-      rawInput: '，两者明确对应广陵=扬州',
-      rawContentJson: expect.any(String),
-      wrongPoint: '',
-      analysis: '',
-      mnemonic: '',
-      extension: '',
-      notes: '',
-      categoryIds: ['常识判断', '常识判断/文史'],
-      userTags: [],
-      template: '言语理解',
-      sourceType: '',
-      sourceDetail: '',
-    });
-    expect(fetchMock.mock.calls.filter(([requestPath]) => requestPath === '/api/cards')).toHaveLength(1);
+    expect(path).toBe('/api/cards');
+    expect(init.method).toBe('POST');
+    const payload = JSON.parse(String((init.body as FormData).get('payload')));
+    expect(payload.rawInput).toBe('下一条知识点');
+    expect(fetchMock.mock.calls.some(([requestPath, requestInit]) => requestPath === '/api/cards/needs-card' && requestInit?.method === 'PATCH')).toBe(false);
   });
 
-  it('同卡编辑不虚假追加图片，并保留服务端已有附件', async () => {
+  it('编辑已有卡片时不虚假追加图片，并保留服务端已有附件', async () => {
     const user = userEvent.setup();
     const existingAttachment = {
       id: 'attachment-1',
@@ -375,23 +545,225 @@ describe('录入表单', () => {
       mimeType: 'image/png',
       byteSize: 6,
     };
-    const fetchMock = vi.mocked(fetch).mockResolvedValue(
-      jsonResponse(card({ aiStatus: 'needs_input', quizItems: [], attachments: [existingAttachment] }), 201),
-    );
-    render(<EntryPage />);
-    await chooseRequiredFields(user);
-    await user.click(screen.getByRole('button', { name: '保存并自动整理' }));
+    const fetchMock = vi.mocked(fetch).mockImplementation(async (input, init) => {
+      const path = String(input);
+      if (path === '/api/cards/card-1' && (!init?.method || init.method === 'GET')) {
+        return jsonResponse(card({
+          aiStatus: 'needs_input',
+          quizItems: [],
+          attachments: [existingAttachment],
+          categories: [
+            { id: '常识判断', name: '常识判断', parentId: null },
+            { id: '常识判断/文史', name: '文史', parentId: '常识判断' },
+          ],
+        }));
+      }
+      if (path === '/api/cards/card-1' && init?.method === 'PATCH') {
+        return jsonResponse(card({
+          aiStatus: 'needs_input',
+          quizItems: [],
+          attachments: [existingAttachment],
+          categories: [
+            { id: '常识判断', name: '常识判断', parentId: null },
+            { id: '常识判断/文史', name: '文史', parentId: '常识判断' },
+          ],
+        }));
+      }
+      throw new Error(`unexpected request: ${path}`);
+    });
+    window.history.pushState({}, '', '/entry?edit=card-1');
+    render(<App />);
     expect(await screen.findByText('已保存附件：既有图片.png')).toBeInTheDocument();
+    expect(screen.getByLabelText('图片')).toBeDisabled();
+    expect(screen.getByRole('button', { name: '编辑时不追加图片' })).toBeDisabled();
+    expect(screen.getByText('已有图片会继续保留')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: '保存修改' }));
 
-    await user.upload(
-      screen.getByLabelText('图片'),
-      new File(['new'], '新增.png', { type: 'image/png' }),
-    );
-    await user.click(screen.getByRole('button', { name: '保存并自动整理' }));
-
-    expect(await screen.findByRole('alert')).toHaveTextContent('当前卡片暂不支持追加图片，请先移除待上传图片');
+    expect(await screen.findByText('已保存，需要补充关系后再整理')).toBeInTheDocument();
     expect(screen.getByText('已保存附件：既有图片.png')).toBeInTheDocument();
-    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock.mock.calls.filter(([path, init]) => path === '/api/cards/card-1' && init?.method === 'PATCH')).toHaveLength(1);
+  });
+
+  it('编辑模式拦截图片拖经和放下的浏览器默认动作但不追加附件', async () => {
+    vi.mocked(fetch).mockResolvedValue(jsonResponse(card({
+      categories: [
+        { id: '常识判断', name: '常识判断', parentId: null },
+        { id: '常识判断/文史', name: '文史', parentId: '常识判断' },
+      ],
+    })));
+    window.history.pushState({}, '', '/entry?edit=card-1');
+    render(<App />);
+    await screen.findByRole('button', { name: '保存修改' });
+
+    const dropzone = screen.getByRole('group', { name: '图片拖放与粘贴区域' });
+    const image = new File(['png'], '编辑态图片.png', { type: 'image/png' });
+    const dataTransfer = { files: [image], types: ['Files'], dropEffect: 'none' };
+    const dragOver = createEvent.dragOver(dropzone, { dataTransfer });
+    const drop = createEvent.drop(dropzone, { dataTransfer });
+
+    fireEvent(dropzone, dragOver);
+    fireEvent(dropzone, drop);
+
+    expect(dragOver.defaultPrevented).toBe(true);
+    expect(drop.defaultPrevented).toBe(true);
+    expect(screen.queryByText('编辑态图片.png')).not.toBeInTheDocument();
+    expect(fetch).toHaveBeenCalledTimes(1);
+  });
+
+  it('编辑用户初始稿时提交 PUT 重新衍生，不夹带旧题面', async () => {
+    const user = userEvent.setup();
+    const existing = card({
+      categories: [
+        { id: '常识判断', name: '常识判断', parentId: null },
+        { id: '常识判断/文史', name: '文史', parentId: '常识判断' },
+      ],
+      tags: [
+        { id: 'tag-user', name: '古今地名', origin: 'user' },
+        { id: 'tag-ai', name: '历史常识', origin: 'ai' },
+      ],
+    });
+    const fetchMock = vi.mocked(fetch).mockImplementation(async (input, init) => {
+      const path = String(input);
+      if (path === '/api/cards/card-1' && (!init?.method || init.method === 'GET')) {
+        return jsonResponse(existing);
+      }
+      if (path === '/api/cards/card-1/original' && init?.method === 'PUT') {
+        const payload = JSON.parse(String(init.body));
+        expect(payload).toMatchObject({
+          rawInput: '广陵=扬州',
+          categoryIds: ['常识判断', '常识判断/文史'],
+          userTags: ['古今地名'],
+          template: '常识判断',
+          sourceType: '历年真题',
+          sourceDetail: '2025 国考',
+        });
+        expect(payload).not.toHaveProperty('quizItems');
+        expect(payload).not.toHaveProperty('entryMode');
+        return jsonResponse({
+          card: card({
+            normalizedStatement: '重新衍生后的第一题',
+            categories: existing.categories,
+            tags: existing.tags,
+          }),
+          derivedCount: 3,
+        });
+      }
+      throw new Error(`unexpected request: ${path}`);
+    });
+    window.history.pushState({}, '', '/entry?editOriginal=card-1');
+    render(<App />);
+
+    await screen.findByRole('button', { name: '保存并重新衍生' });
+    expect(screen.getByRole('heading', { name: '编辑初始稿' })).toBeInTheDocument();
+    expect(screen.queryByRole('textbox', { name: '第 1 题题目' })).not.toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: '保存并重新衍生' }));
+
+    expect(await screen.findByText('初始稿已更新，并重新衍生 3 个问题')).toBeInTheDocument();
+    expect(fetchMock.mock.calls.filter(([path, init]) => (
+      path === '/api/cards/card-1/original' && init?.method === 'PUT'
+    ))).toHaveLength(1);
+    expect(fetchMock.mock.calls.some(([path, init]) => (
+      path === '/api/cards/card-1' && init?.method === 'PATCH'
+    ))).toBe(false);
+  });
+
+  it('编辑已有卡片时可以手动修正背诵题面和答案', async () => {
+    const user = userEvent.setup();
+    const fetchMock = vi.mocked(fetch).mockImplementation(async (input, init) => {
+      const path = String(input);
+      if (path === '/api/cards/card-1' && (!init?.method || init.method === 'GET')) {
+        return jsonResponse(card({
+          categories: [
+            { id: '常识判断', name: '常识判断', parentId: null },
+            { id: '常识判断/文史', name: '文史', parentId: '常识判断' },
+          ],
+        }));
+      }
+      if (path === '/api/cards/card-1' && init?.method === 'PATCH') {
+        const payload = JSON.parse(String(init.body));
+        expect(payload.quizItems).toEqual([
+          { id: 'quiz-1', question: '广陵现在对应哪座城市？', answer: '扬州' },
+          { id: 'quiz-2', question: '扬州古称什么？', answer: '广陵、江都' },
+        ]);
+        return jsonResponse(card({
+          quizItems: [
+            { id: 'quiz-1', direction: 'forward', question: '广陵现在对应哪座城市？', answer: '扬州', dueAt: '2026-07-17T00:00:00.000Z' },
+            { id: 'quiz-2', direction: 'reverse', question: '扬州古称什么？', answer: '广陵、江都', dueAt: '2026-07-17T00:00:00.000Z' },
+          ],
+          categories: [
+            { id: '常识判断', name: '常识判断', parentId: null },
+            { id: '常识判断/文史', name: '文史', parentId: '常识判断' },
+          ],
+        }));
+      }
+      throw new Error(`unexpected request: ${path}`);
+    });
+    window.history.pushState({}, '', '/entry?edit=card-1');
+    render(<App />);
+    const firstQuestion = await screen.findByRole('textbox', { name: '第 1 题题目' });
+    const secondAnswer = screen.getByRole('textbox', { name: '第 2 题答案' });
+
+    await user.clear(firstQuestion);
+    await user.type(firstQuestion, '广陵现在对应哪座城市？');
+    await user.clear(secondAnswer);
+    await user.type(secondAnswer, '广陵、江都');
+    await user.click(screen.getByRole('button', { name: '保存修改' }));
+
+    expect(await screen.findByText('已保存并完成整理')).toBeInTheDocument();
+    expect(fetchMock.mock.calls.filter(([path, init]) => path === '/api/cards/card-1' && init?.method === 'PATCH')).toHaveLength(1);
+  });
+
+  it('编辑已有卡片时拒绝保存空背诵题面或答案', async () => {
+    const user = userEvent.setup();
+    const fetchMock = vi.mocked(fetch).mockImplementation(async (input, init) => {
+      const path = String(input);
+      if (path === '/api/cards/card-1' && (!init?.method || init.method === 'GET')) {
+        return jsonResponse(card({
+          categories: [
+            { id: '常识判断', name: '常识判断', parentId: null },
+            { id: '常识判断/文史', name: '文史', parentId: '常识判断' },
+          ],
+        }));
+      }
+      throw new Error(`unexpected request: ${path}`);
+    });
+    window.history.pushState({}, '', '/entry?edit=card-1');
+    render(<App />);
+    const firstQuestion = await screen.findByRole('textbox', { name: '第 1 题题目' });
+
+    await user.clear(firstQuestion);
+    await user.click(screen.getByRole('button', { name: '保存修改' }));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('请补全背诵题面和答案后再保存');
+    expect(fetchMock.mock.calls.filter(([path, init]) => path === '/api/cards/card-1' && init?.method === 'PATCH')).toHaveLength(0);
+  });
+
+  it('编辑保存遇到正在整理的卡片时显示服务端原因', async () => {
+    const fetchMock = vi.mocked(fetch).mockImplementation(async (input, init) => {
+      const path = String(input);
+      if (path === '/api/cards/card-1' && (!init?.method || init.method === 'GET')) {
+        return jsonResponse(card({
+          aiStatus: 'processing',
+          categories: [
+            { id: '常识判断', name: '常识判断', parentId: null },
+            { id: '常识判断/文史', name: '文史', parentId: '常识判断' },
+          ],
+        }));
+      }
+      if (path === '/api/cards/card-1' && init?.method === 'PATCH') {
+        return apiErrorResponse('processing_conflict', '卡片正在整理，请稍后再编辑相关内容', 409);
+      }
+      throw new Error(`unexpected request: ${path}`);
+    });
+    const user = userEvent.setup();
+    window.history.pushState({}, '', '/entry?edit=card-1');
+    render(<App />);
+    expect(await screen.findByText('当前卡片待整理')).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: '保存修改' }));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('卡片正在整理，请稍后再编辑相关内容');
+    expect(fetchMock.mock.calls.filter(([path, init]) => path === '/api/cards/card-1' && init?.method === 'PATCH')).toHaveLength(1);
   });
 
   it('保存请求在同一批次内只发一次并在完成前禁用取消', async () => {
@@ -420,11 +792,11 @@ describe('录入表单', () => {
     resolveRequest?.(jsonResponse(card({ aiStatus: 'pending', quizItems: [] }), 201));
 
     expect(await screen.findByText('已保存，等待重新整理')).toBeInTheDocument();
-    expect(screen.getByRole('textbox', { name: '原始内容' })).toHaveTextContent('广陵=扬州');
+    expect(screen.getByRole('textbox', { name: '原始内容' })).toHaveTextContent('');
     expect(cancelButton).toBeEnabled();
   });
 
-  it('ready 后清空新建表单和附件但保留成功文案', async () => {
+  it('保存成功后清空新建表单和附件但保留成功文案', async () => {
     const user = userEvent.setup();
     const attachment = {
       id: 'ready-attachment',
@@ -438,7 +810,6 @@ describe('录入表单', () => {
     );
     render(<EntryPage />);
     await chooseRequiredFields(user);
-    await user.click(screen.getByRole('radio', { name: '知识点积累' }));
     await user.selectOptions(screen.getByRole('combobox', { name: '模板' }), '常识判断');
     await user.type(screen.getByRole('textbox', { name: '正确解析' }), '广陵对应扬州');
     await user.type(screen.getByLabelText('标签'), '古今地名');
@@ -449,8 +820,8 @@ describe('录入表单', () => {
 
     await user.click(screen.getByRole('button', { name: '保存并自动整理' }));
 
-    expect(await screen.findByText('已生成 2 个背诵方向')).toBeInTheDocument();
-    expect(screen.getByRole('radio', { name: '错题录入' })).toBeChecked();
+    expect(await screen.findByText('已生成 2 个背诵方向，可继续录入下一条')).toBeInTheDocument();
+    expect(screen.queryByRole('radio')).not.toBeInTheDocument();
     expect(screen.getByRole('combobox', { name: '模板' })).toHaveValue('言语理解');
     expect(screen.getByRole('textbox', { name: '原始内容' })).toHaveTextContent('');
     expect(screen.getByRole('textbox', { name: '正确解析' })).toHaveValue('');
@@ -461,12 +832,17 @@ describe('录入表单', () => {
     expect(screen.queryByText('待上传.png')).not.toBeInTheDocument();
     expect(screen.queryByText('已保存附件：已保存.png')).not.toBeInTheDocument();
 
+    const clearedEditor = screen.getByRole('textbox', { name: '原始内容' });
+    await user.click(clearedEditor);
+    await user.keyboard('{Control>}z{/Control}');
+    expect(clearedEditor).toHaveTextContent('');
+
     await user.click(screen.getByRole('button', { name: '保存并自动整理' }));
 
     expect(screen.getByText('请选择至少一个所属板块')).toBeInTheDocument();
     expect(screen.getByText('请选择至少一个细分考点')).toBeInTheDocument();
     expect(screen.getByText('请输入原始内容')).toBeInTheDocument();
-    expect(screen.getByText('已生成 2 个背诵方向')).toBeInTheDocument();
+    expect(screen.getByText('已生成 2 个背诵方向，可继续录入下一条')).toBeInTheDocument();
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 

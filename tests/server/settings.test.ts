@@ -15,7 +15,11 @@ describe('非敏感设置接口', () => {
   function setup(apiKey = '') {
     const database = createTestDatabase();
     databases.push(database);
-    const settings = { database: database.manager, deepseekApiKey: apiKey };
+    const settings = {
+      database: database.manager,
+      deepseekApiKey: apiKey,
+      isQqMusicAvailable: (path: string) => path === 'C:\\Apps\\QQMusic.exe',
+    };
     return { database, settings, app: createApp({ settings }) };
   }
 
@@ -31,6 +35,9 @@ describe('非敏感设置接口', () => {
       defaultSessionSize: 20,
       defaultOrder: 'random',
       dueFirst: true,
+      defaultFocusMinutes: 25,
+      qqMusicPath: '',
+      qqMusicAvailable: false,
       deepseekConfigured: true,
     });
     expect(missingResponse.body.deepseekConfigured).toBe(false);
@@ -40,7 +47,13 @@ describe('非敏感设置接口', () => {
   it('PATCH 只更新明确提供的字段并持久化到现有键值表', async () => {
     const { database, settings, app } = setup('local-key');
 
-    const first = await request(app).patch('/api/settings').send({ defaultSessionSize: 30 });
+    const first = await request(app)
+      .patch('/api/settings')
+      .send({
+        defaultSessionSize: 30,
+        defaultFocusMinutes: 45,
+        qqMusicPath: 'C:\\Apps\\QQMusic.exe',
+      });
     const second = await request(app)
       .patch('/api/settings')
       .send({ defaultOrder: 'fixed', dueFirst: false });
@@ -50,21 +63,29 @@ describe('非敏感设置接口', () => {
       defaultSessionSize: 30,
       defaultOrder: 'random',
       dueFirst: true,
+      defaultFocusMinutes: 45,
+      qqMusicPath: 'C:\\Apps\\QQMusic.exe',
+      qqMusicAvailable: true,
       deepseekConfigured: true,
     });
     expect(second.body).toEqual({
       defaultSessionSize: 30,
       defaultOrder: 'fixed',
       dueFirst: false,
+      defaultFocusMinutes: 45,
+      qqMusicPath: 'C:\\Apps\\QQMusic.exe',
+      qqMusicAvailable: true,
       deepseekConfigured: true,
     });
     expect(reloaded.body).toEqual(second.body);
     expect(
       database.db.prepare('SELECT key, value_json FROM app_settings ORDER BY key').all(),
     ).toEqual([
+      { key: 'defaultFocusMinutes', value_json: '45' },
       { key: 'defaultOrder', value_json: '"fixed"' },
       { key: 'defaultSessionSize', value_json: '30' },
       { key: 'dueFirst', value_json: 'false' },
+      { key: 'qqMusicPath', value_json: '"C:\\\\Apps\\\\QQMusic.exe"' },
     ]);
   });
 
@@ -77,6 +98,11 @@ describe('非敏感设置接口', () => {
       { defaultSessionSize: 1.5 },
       { defaultOrder: 'sql-random' },
       { dueFirst: 'true' },
+      { defaultFocusMinutes: 10 },
+      { defaultFocusMinutes: 60 },
+      { qqMusicPath: 'QQMusic.exe' },
+      { qqMusicPath: '\\\\server\\share\\QQMusic.exe' },
+      { qqMusicPath: 'C:\\Apps\\notepad.exe' },
       { DEEPSEEK_API_KEY: 'sk-test' },
       { defaultSessionSize: 10, extra: true },
     ];

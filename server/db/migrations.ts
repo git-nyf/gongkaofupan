@@ -53,6 +53,42 @@ export function migrate(database: Database.Database) {
       database.exec(readFileSync(cardTemplatePath, 'utf8'));
       recordMigration.run(2, new Date().toISOString());
     }
+
+    if (!appliedVersions.has(3)) {
+      const splitCardTitlesPath = resolve(
+        process.cwd(),
+        'server',
+        'db',
+        'migrations',
+        '003_distinct_split_card_titles.sql',
+      );
+      database.exec(readFileSync(splitCardTitlesPath, 'utf8'));
+      recordMigration.run(3, new Date().toISOString());
+    }
+
+    if (!appliedVersions.has(4)) {
+      const manualOrderPath = resolve(
+        process.cwd(),
+        'server',
+        'db',
+        'migrations',
+        '004_card_manual_order.sql',
+      );
+      database.exec(readFileSync(manualOrderPath, 'utf8'));
+      recordMigration.run(4, new Date().toISOString());
+    }
+
+    if (!appliedVersions.has(5)) {
+      const cardFoldersPath = resolve(
+        process.cwd(),
+        'server',
+        'db',
+        'migrations',
+        '005_card_folders.sql',
+      );
+      database.exec(readFileSync(cardFoldersPath, 'utf8'));
+      recordMigration.run(5, new Date().toISOString());
+    }
   });
 
   applyMigrations();

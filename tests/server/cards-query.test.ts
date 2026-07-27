@@ -26,8 +26,6 @@ const baseInput: CreateCardInput = {
   template: '常识模板',
   sourceType: 'manual',
   sourceDetail: '',
-  rating: 3,
-  initialMastery: 'unseen',
   attachments: [],
 };
 
@@ -48,6 +46,7 @@ type TestDatabase = ReturnType<typeof createTestDatabase>;
 interface InsertCardOptions {
   id: string;
   rawInput?: string;
+  rawContentJson?: string | null;
   normalizedStatement?: string;
   analysis?: string;
   mnemonic?: string;
@@ -106,6 +105,11 @@ function insertCard(database: TestDatabase, options: InsertCardOptions) {
       createdAt,
       createdAt,
     );
+  if (options.rawContentJson !== undefined) {
+    database.db
+      .prepare('UPDATE cards SET raw_content_json = ? WHERE id = ?')
+      .run(options.rawContentJson, options.id);
+  }
 
   const insertCategory = database.db.prepare(
     'INSERT INTO card_categories (card_id, category_id) VALUES (?, ?)',
@@ -147,7 +151,7 @@ describe('卡片查询、管理与批量操作', () => {
     return { app, database, normalize, service, uploadsDirectory };
   }
 
-  it('逐项命中六个文本字段和标签名，并把百分号、下划线与注入文本按字面处理', async () => {
+  it('按片段命中文本、易错点、题目、答案和标签，并把特殊字符按字面处理', async () => {
     const { app, database } = setup();
     const searchable = [
       ['raw', { rawInput: '命中-raw' }],
@@ -164,12 +168,40 @@ describe('卡片查询、管理与批量操作', () => {
       id: 'tag',
       tags: [{ id: 'tag-search-id', name: '命中-tag', origin: 'ai' }],
     });
+    insertCard(database, { id: 'wrong-point' });
+    database.db
+      .prepare("UPDATE cards SET wrong_point = '易错点片段命中' WHERE id = 'wrong-point'")
+      .run();
+    insertCard(database, { id: 'quiz' });
+    database.db
+      .prepare(`
+        INSERT INTO quiz_items (
+          id, card_id, direction, question, answer, due_at, created_at
+        ) VALUES (
+          'quiz-search', 'quiz', 'single', '题目片段命中', '答案片段命中', ?, ?
+        )
+      `)
+      .run(fixedNow.toISOString(), fixedNow.toISOString());
     insertCard(database, { id: 'literal', rawInput: '百分号%和下划线_' });
     insertCard(database, { id: 'wildcard-lookalike', rawInput: '百分号X和下划线Y' });
     insertCard(database, { id: 'other', rawInput: '普通内容' });
 
     for (const [id] of [...searchable, ['tag']] as const) {
       const response = await request(app).get('/api/cards').query({ query: `命中-${id}` });
+      expect(response.status).toBe(200);
+      expect(response.body.items.map((item: { id: string }) => item.id)).toEqual([id]);
+    }
+
+    const partial = await request(app).get('/api/cards').query({ query: '中-ra' });
+    expect(partial.status).toBe(200);
+    expect(partial.body.items.map((item: { id: string }) => item.id)).toEqual(['raw']);
+
+    for (const [query, id] of [
+      ['错点片段', 'wrong-point'],
+      ['题目片段', 'quiz'],
+      ['答案片段', 'quiz'],
+    ] as const) {
+      const response = await request(app).get('/api/cards').query({ query });
       expect(response.status).toBe(200);
       expect(response.body.items.map((item: { id: string }) => item.id)).toEqual([id]);
     }
@@ -183,14 +215,33 @@ describe('卡片查询、管理与批量操作', () => {
     expect(injection.body.total).toBe(0);
   });
 
+  it('空格分隔的多个关键词可跨字段模糊组合且必须全部命中', async () => {
+    const { app, database } = setup();
+    insertCard(database, {
+      id: 'combined-match',
+      rawInput: '行政执法流程',
+      analysis: '适用比例原则',
+    });
+    insertCard(database, {
+      id: 'single-term-only',
+      rawInput: '行政执法流程',
+      analysis: '其他内容',
+    });
+
+    const response = await request(app).get('/api/cards').query({ query: '  行政   比例  ' });
+
+    expect(response.status).toBe(200);
+    expect(response.body.items.map((item: { id: string }) => item.id)).toEqual([
+      'combined-match',
+    ]);
+  });
+
   it('分别执行全部筛选并按 AND 组合，分类和标签只匹配精确关系', async () => {
     const { app, database } = setup();
     const common = {
       rawInput: '组合目标',
       categoryIds: firstCategory,
       tags: [{ id: 'target-tag', name: '精确标签' }],
-      rating: 4,
-      mastery: 'hard' as const,
       aiStatus: 'ready' as const,
       archived: true,
       createdAt: '2026-07-15T12:00:00.000Z',
@@ -202,8 +253,6 @@ describe('卡片查询、管理与批量操作', () => {
       ...common,
       tags: [{ id: 'other-tag', name: '精确标签扩展' }],
     });
-    insertCard(database, { id: 'different-rating', ...common, rating: 3 });
-    insertCard(database, { id: 'different-mastery', ...common, mastery: 'good' });
     insertCard(database, { id: 'different-status', ...common, aiStatus: 'pending' });
     insertCard(database, { id: 'different-archive', ...common, archived: false });
     insertCard(database, {
@@ -215,8 +264,6 @@ describe('卡片查询、管理与批量操作', () => {
     const cases = [
       [{ categoryIds: '常识判断/文史', archived: 'true' }, 'different-category'],
       [{ tagIds: 'target-tag', archived: 'true' }, 'different-tag'],
-      [{ rating: '4', archived: 'true' }, 'different-rating'],
-      [{ mastery: 'hard', archived: 'true' }, 'different-mastery'],
       [{ aiStatus: 'ready', archived: 'true' }, 'different-status'],
       [{ archived: 'true' }, 'different-archive'],
       [
@@ -236,8 +283,6 @@ describe('卡片查询、管理与批量操作', () => {
       query: '组合目标',
       categoryIds: ['常识判断/文史', '不存在分类'],
       tagIds: ['target-tag', 'missing-tag'],
-      rating: '4',
-      mastery: 'hard',
       aiStatus: 'ready',
       archived: 'true',
       createdFrom: '2026-07-15T00:00:00.000Z',
@@ -287,12 +332,79 @@ describe('卡片查询、管理与批量操作', () => {
     expect(second.body.items.map((item: { id: string }) => item.id)).toEqual(['a']);
   });
 
+  it('用户初始稿先按源稿去重分页，并完整返回当页每份源稿的衍生卡片', async () => {
+    const { app, database } = setup();
+    for (let index = 0; index < 25; index += 1) {
+      const source = `第 ${String(index).padStart(2, '0')} 份源稿`;
+      insertCard(database, {
+        id: `source-${String(index).padStart(2, '0')}-a`,
+        rawInput: source,
+        rawContentJson: JSON.stringify({ type: 'doc', content: [{ type: 'text', text: source }] }),
+        createdAt: `2026-07-${String(index + 1).padStart(2, '0')}T09:00:00.000Z`,
+      });
+    }
+    const sharedContent = JSON.stringify({
+      type: 'doc',
+      content: [{ type: 'text', text: '第 24 份源稿' }],
+    });
+    insertCard(database, {
+      id: 'source-24-b',
+      rawInput: '这段文本不同，但有效富文本相同',
+      rawContentJson: sharedContent,
+      createdAt: '2026-07-25T08:00:00.000Z',
+    });
+    insertCard(database, {
+      id: 'source-24-c-filtered-out',
+      rawInput: '第 24 份源稿',
+      rawContentJson: sharedContent,
+      categoryIds: secondCategory,
+      createdAt: '2026-07-25T07:00:00.000Z',
+    });
+
+    const first = await request(app).get('/api/cards').query({
+      contentVersion: 'original',
+      categoryIds: firstCategory[1],
+      page: '1',
+      pageSize: '20',
+    });
+    const second = await request(app).get('/api/cards').query({
+      contentVersion: 'original',
+      categoryIds: firstCategory[1],
+      page: '2',
+      pageSize: '20',
+    });
+
+    expect(first.status).toBe(200);
+    expect(first.body).toMatchObject({ total: 25, page: 1, pageSize: 20 });
+    expect(new Set(first.body.items.map((item: { rawContentJson: string }) => item.rawContentJson)).size).toBe(20);
+    expect(first.body.items.map((item: { id: string }) => item.id)).toEqual(
+      expect.arrayContaining(['source-24-a', 'source-24-b']),
+    );
+    expect(first.body.items.map((item: { id: string }) => item.id)).not.toContain(
+      'source-24-c-filtered-out',
+    );
+    expect(second.status).toBe(200);
+    expect(second.body).toMatchObject({ total: 25, page: 2, pageSize: 20 });
+    expect(new Set(second.body.items.map((item: { rawContentJson: string }) => item.rawContentJson)).size).toBe(5);
+
+    const optimized = await request(app).get('/api/cards').query({
+      contentVersion: 'optimized',
+      categoryIds: firstCategory[1],
+      page: '1',
+      pageSize: '20',
+    });
+    expect(optimized.status).toBe(200);
+    expect(optimized.body).toMatchObject({ total: 26, page: 1, pageSize: 20 });
+    expect(optimized.body.items).toHaveLength(20);
+  });
+
   it.each([
     ['rating', { rating: '1.0' }],
     ['page', { page: '0' }],
     ['pageSize', { pageSize: '101' }],
     ['mastery', { mastery: 'mastered' }],
     ['aiStatus', { aiStatus: 'done' }],
+    ['contentVersion', { contentVersion: 'raw' }],
     ['archived', { archived: 'yes' }],
     ['date', { createdFrom: '2026-02-31' }],
     ['range', { createdFrom: '2026-07-18', createdTo: '2026-07-17' }],
@@ -340,8 +452,6 @@ describe('卡片查询、管理与批量操作', () => {
         template: '新模板',
         sourceType: 'book',
         sourceDetail: '第十页',
-        rating: 5,
-        mastery: 'good',
         archived: true,
       });
 
@@ -358,8 +468,6 @@ describe('卡片查询、管理与批量操作', () => {
       template: '新模板',
       sourceType: 'book',
       sourceDetail: '第十页',
-      rating: 5,
-      mastery: 'good',
       archived: true,
     });
     expect(response.body.categories.map(({ id }: { id: string }) => id)).toEqual(secondCategory);
@@ -390,8 +498,8 @@ describe('卡片查询、管理与批量操作', () => {
     const empty = await request(app).patch(`/api/cards/${created.body.id}`).send({});
     const extra = await request(app)
       .patch(`/api/cards/${created.body.id}`)
-      .send({ rating: 4, extra: true });
-    const missing = await request(app).patch('/api/cards/missing').send({ rating: 4 });
+      .send({ notes: '不应接受额外字段', extra: true });
+    const missing = await request(app).patch('/api/cards/missing').send({ notes: '缺失卡片' });
 
     expect(invalidCategory.status).toBe(400);
     expect(detail.body.notes).toBe('笔记');
@@ -422,7 +530,7 @@ describe('卡片查询、管理与批量操作', () => {
       .send({ rawInput: '  原始卡片  ' });
     const metadataOnly = await request(app)
       .patch(`/api/cards/${created.body.id}`)
-      .send({ rating: 4, userTags: ['同名标签'], archived: true });
+      .send({ userTags: ['同名标签'], archived: true });
 
     expect(sameRaw.status).toBe(200);
     expect(metadataOnly.status).toBe(200);
@@ -471,11 +579,11 @@ describe('卡片查询、管理与批量操作', () => {
 
     const safePatch = await request(app)
       .patch('/api/cards/processing-card')
-      .send({ rating: 4, userTags: ['安全标签'], archived: true });
+      .send({ userTags: ['安全标签'], archived: true });
     const mixedConflict = await request(app)
       .patch('/api/cards/processing-card')
-      .send({ rawInput: '新原文', rating: 5 });
-    const masteryConflict = await request(app)
+      .send({ rawInput: '新原文', userTags: ['新标签'] });
+    const deprecatedConflict = await request(app)
       .patch('/api/cards/processing-card')
       .send({ mastery: 'hard' });
 
@@ -485,12 +593,12 @@ describe('卡片查询、管理与批量操作', () => {
       code: 'processing_conflict',
       message: '卡片正在整理，请稍后再编辑相关内容',
     });
-    expect(masteryConflict.status).toBe(409);
+    expect(deprecatedConflict.status).toBe(400);
     expect(
       database.db
-        .prepare('SELECT raw_input, rating, mastery, archived FROM cards WHERE id = ?')
+        .prepare('SELECT raw_input, mastery, archived FROM cards WHERE id = ?')
         .get('processing-card'),
-    ).toEqual({ raw_input: '旧原文', rating: 4, mastery: 'unseen', archived: 1 });
+    ).toEqual({ raw_input: '旧原文', mastery: 'unseen', archived: 1 });
 
     completeAi(
       normalized({
@@ -504,8 +612,6 @@ describe('卡片查询、管理与批量操作', () => {
     expect(retried.body).toMatchObject({
       rawInput: '旧原文',
       normalizedStatement: '旧原文规范表述',
-      rating: 4,
-      mastery: 'unseen',
       archived: true,
       aiStatus: 'ready',
     });
@@ -521,7 +627,7 @@ describe('卡片查询、管理与批量操作', () => {
     ]);
   });
 
-  it('批量加星、加标签和归档时去重编号、忽略缺失卡片并返回实际命中数', async () => {
+  it('批量加标签和归档时去重编号、忽略缺失卡片并返回实际命中数', async () => {
     const { app, database } = setup();
     insertCard(database, {
       id: 'bulk-a',
@@ -533,7 +639,6 @@ describe('卡片查询、管理与批量操作', () => {
       .patch('/api/cards/bulk')
       .send({
         ids: ['bulk-a', 'bulk-a', 'missing', 'bulk-b'],
-        rating: 5,
         tags: [' 批量标签 ', '批量标签', '新增标签', ' '],
         archived: true,
       });
@@ -542,7 +647,7 @@ describe('卡片查询、管理与批量操作', () => {
     expect(response.body).toEqual({ updated: 2 });
     for (const id of ['bulk-a', 'bulk-b']) {
       const detail = await request(app).get(`/api/cards/${id}`);
-      expect(detail.body).toMatchObject({ rating: 5, archived: true });
+      expect(detail.body).toMatchObject({ archived: true });
       expect(detail.body.tags).toHaveLength(2);
       expect(detail.body.tags).toEqual(
         expect.arrayContaining([
@@ -559,7 +664,7 @@ describe('卡片查询、管理与批量操作', () => {
     insertCard(database, { id: 'bulk-b', rating: 1 });
     database.db.exec(`
       CREATE TRIGGER reject_bulk_b
-      BEFORE UPDATE OF rating ON cards
+      BEFORE UPDATE OF archived ON cards
       WHEN NEW.id = 'bulk-b'
       BEGIN
         SELECT RAISE(ABORT, 'private SQL detail');
@@ -568,23 +673,382 @@ describe('卡片查询、管理与批量操作', () => {
 
     const response = await request(app)
       .patch('/api/cards/bulk')
-      .send({ ids: ['bulk-a', 'bulk-b'], rating: 5 });
+      .send({ ids: ['bulk-a', 'bulk-b'], archived: true });
 
     expect(response.status).toBe(500);
     expect(JSON.stringify(response.body)).not.toContain('private SQL detail');
     expect(
-      database.db.prepare("SELECT id, rating FROM cards WHERE id LIKE 'bulk-%' ORDER BY id").all(),
+      database.db.prepare("SELECT id, archived FROM cards WHERE id LIKE 'bulk-%' ORDER BY id").all(),
     ).toEqual([
-      { id: 'bulk-a', rating: 1 },
-      { id: 'bulk-b', rating: 1 },
+      { id: 'bulk-a', archived: 0 },
+      { id: 'bulk-b', archived: 0 },
+    ]);
+  });
+
+  it('未调整时新卡在前，置顶和置底后立即按人工顺序移动', async () => {
+    const { app, database } = setup();
+    insertCard(database, { id: 'order-old', createdAt: '2026-07-15T09:00:00.000Z' });
+    insertCard(database, { id: 'order-new', createdAt: '2026-07-19T09:00:00.000Z' });
+    insertCard(database, { id: 'order-newest', createdAt: '2026-07-20T09:00:00.000Z' });
+
+    const initial = await request(app).get('/api/cards');
+    expect(initial.body.items.map((item: { id: string }) => item.id)).toEqual([
+      'order-newest',
+      'order-new',
+      'order-old',
+    ]);
+
+    const top = await request(app)
+      .patch('/api/cards/bulk')
+      .send({ ids: ['order-old'], position: 'top' });
+    const afterTop = await request(app).get('/api/cards');
+    const bottom = await request(app)
+      .patch('/api/cards/bulk')
+      .send({ ids: ['order-newest'], position: 'bottom' });
+    const afterBottom = await request(app).get('/api/cards');
+
+    expect(top.body).toEqual({ updated: 1 });
+    expect(afterTop.body.items.map((item: { id: string }) => item.id)).toEqual([
+      'order-old',
+      'order-newest',
+      'order-new',
+    ]);
+    expect(bottom.body).toEqual({ updated: 1 });
+    expect(afterBottom.body.items.map((item: { id: string }) => item.id)).toEqual([
+      'order-old',
+      'order-new',
+      'order-newest',
+    ]);
+  });
+
+  it('新录入卡片取得当前最大顺序并排在已有置顶卡前', async () => {
+    const { app, database } = setup();
+    insertCard(database, { id: 'existing-pinned', createdAt: '2026-07-15T09:00:00.000Z' });
+    await request(app)
+      .patch('/api/cards/bulk')
+      .send({ ids: ['existing-pinned'], position: 'top' });
+
+    const created = await request(app).post('/api/cards').send(createInput({ rawInput: '刚录入的新卡片' }));
+    const ordered = await request(app).get('/api/cards');
+    const manualOrders = database.db
+      .prepare('SELECT id, manual_order FROM cards ORDER BY manual_order DESC')
+      .all() as Array<{ id: string; manual_order: number }>;
+
+    expect(created.status).toBe(201);
+    expect(manualOrders).toEqual([
+      { id: created.body.id, manual_order: 2 },
+      { id: 'existing-pinned', manual_order: 1 },
+    ]);
+    expect(ordered.body.items.map((item: { id: string }) => item.id)).toEqual([
+      created.body.id,
+      'existing-pinned',
+    ]);
+  });
+
+  it('用户初始稿的分组代表、组间和组内均以人工顺序优先', async () => {
+    const { app, database } = setup();
+    insertCard(database, {
+      id: 'original-a-old',
+      rawInput: 'shared source A',
+      createdAt: '2026-07-15T09:00:00.000Z',
+    });
+    insertCard(database, {
+      id: 'original-a-new',
+      rawInput: 'shared source A',
+      createdAt: '2026-07-17T09:00:00.000Z',
+    });
+    insertCard(database, {
+      id: 'original-a-bottom',
+      rawInput: 'shared source A',
+      createdAt: '2026-07-20T09:00:00.000Z',
+    });
+    insertCard(database, {
+      id: 'original-b',
+      rawInput: 'separate source B',
+      createdAt: '2026-07-18T09:00:00.000Z',
+    });
+    insertCard(database, {
+      id: 'original-c-bottom',
+      rawInput: 'separate source C',
+      createdAt: '2026-07-19T09:00:00.000Z',
+    });
+
+    const top = await request(app)
+      .patch('/api/cards/bulk')
+      .send({ ids: ['original-a-old', 'original-a-new', 'original-a-bottom'], position: 'top' });
+    const bottom = await request(app)
+      .patch('/api/cards/bulk')
+      .send({ ids: ['original-c-bottom'], position: 'bottom' });
+    expect(top.body).toEqual({ updated: 3 });
+    expect(bottom.body).toEqual({ updated: 1 });
+
+    const response = await request(app).get('/api/cards').query({ contentVersion: 'original' });
+    expect(response.body).toMatchObject({ total: 3 });
+    expect(response.body.items.map((item: { id: string }) => item.id)).toEqual([
+      'original-a-bottom',
+      'original-a-new',
+      'original-a-old',
+      'original-b',
+      'original-c-bottom',
+    ]);
+  });
+
+  it('随机初始稿排除归档和空原稿，并按来源去重后返回最新代表', async () => {
+    const { app, database } = setup();
+    insertCard(database, {
+      id: 'random-old-pinned',
+      rawInput: '同一份用户初始稿',
+      createdAt: '2026-07-15T09:00:00.000Z',
+    });
+    insertCard(database, {
+      id: 'random-new-low',
+      rawInput: '同一份用户初始稿',
+      createdAt: '2026-07-17T09:00:00.000Z',
+    });
+    insertCard(database, {
+      id: 'random-new-high',
+      rawInput: '同一份用户初始稿',
+      createdAt: '2026-07-17T09:00:00.000Z',
+    });
+    insertCard(database, {
+      id: 'random-archived',
+      rawInput: '已归档初始稿',
+      archived: true,
+      createdAt: '2026-07-19T09:00:00.000Z',
+    });
+    insertCard(database, {
+      id: 'random-empty',
+      rawInput: '   ',
+      rawContentJson: JSON.stringify({ type: 'doc', content: [{ type: 'text', text: '空原稿' }] }),
+      createdAt: '2026-07-20T09:00:00.000Z',
+    });
+
+    await request(app)
+      .patch('/api/cards/bulk')
+      .send({ ids: ['random-new-high'], position: 'top' });
+    await request(app)
+      .patch('/api/cards/bulk')
+      .send({ ids: ['random-old-pinned'], position: 'top' });
+
+    const response = await request(app).get('/api/cards/random-original');
+
+    expect(response.status).toBe(200);
+    expect(response.body).toEqual({ card: expect.objectContaining({ id: 'random-new-high' }) });
+  });
+
+  it('随机初始稿在空库返回空卡片', async () => {
+    const { app } = setup();
+
+    const response = await request(app).get('/api/cards/random-original');
+
+    expect(response.status).toBe(200);
+    expect(response.body).toEqual({ card: null });
+  });
+
+  it('随机初始稿按 ANY 筛选，一级板块包含其子板块且二级板块保持精确', async () => {
+    const { app, database } = setup();
+    insertCard(database, {
+      id: 'random-child-only',
+      rawInput: '子分类原稿',
+      categoryIds: [firstCategory[1]],
+    });
+    insertCard(database, {
+      id: 'random-unrelated',
+      rawInput: '其他板块原稿',
+      categoryIds: [secondCategory[1]],
+    });
+
+    const child = await request(app)
+      .get('/api/cards/random-original')
+      .query({ categoryIds: ['不存在分类', firstCategory[1], firstCategory[1]] });
+    const parent = await request(app)
+      .get('/api/cards/random-original')
+      .query({ categoryIds: firstCategory[0] });
+
+    expect(child.status).toBe(200);
+    expect(child.body).toEqual({ card: expect.objectContaining({ id: 'random-child-only' }) });
+    expect(parent.status).toBe(200);
+    expect(parent.body).toEqual({ card: expect.objectContaining({ id: 'random-child-only' }) });
+  });
+
+  it('随机初始稿先按日期筛选，再从匹配范围内选择同源最新代表', async () => {
+    const { app, database } = setup();
+    insertCard(database, {
+      id: 'random-same-source-in-range-old',
+      rawInput: '日期范围内同源原稿',
+      createdAt: '2026-07-15T00:00:00.000Z',
+    });
+    insertCard(database, {
+      id: 'random-same-source-in-range-new',
+      rawInput: '日期范围内同源原稿',
+      createdAt: '2026-07-15T23:59:59.999Z',
+    });
+    insertCard(database, {
+      id: 'random-same-source-outside',
+      rawInput: '日期范围内同源原稿',
+      createdAt: '2026-07-16T00:00:00.000Z',
+    });
+    insertCard(database, {
+      id: 'random-other-date',
+      rawInput: '其他日期原稿',
+      createdAt: '2026-07-14T23:59:59.999Z',
+    });
+
+    const response = await request(app)
+      .get('/api/cards/random-original')
+      .query({ createdFrom: '2026-07-15', createdTo: '2026-07-15' });
+
+    expect(response.status).toBe(200);
+    expect(response.body).toEqual({
+      card: expect.objectContaining({ id: 'random-same-source-in-range-new' }),
+    });
+  });
+
+  it('随机初始稿范围没有匹配来源时返回空卡片', async () => {
+    const { app, database } = setup();
+    insertCard(database, {
+      id: 'random-no-match',
+      rawInput: '不在筛选范围内',
+      categoryIds: [firstCategory[0]],
+      createdAt: '2026-07-15T12:00:00.000Z',
+    });
+
+    const byCategory = await request(app)
+      .get('/api/cards/random-original')
+      .query({ categoryIds: secondCategory[1] });
+    const byDate = await request(app)
+      .get('/api/cards/random-original')
+      .query({ createdFrom: '2026-07-16', createdTo: '2026-07-16' });
+
+    expect(byCategory.status).toBe(200);
+    expect(byCategory.body).toEqual({ card: null });
+    expect(byDate.status).toBe(200);
+    expect(byDate.body).toEqual({ card: null });
+  });
+
+  it('随机初始稿计数与抽取使用相同范围，并按原始来源去重', async () => {
+    const { app, database } = setup();
+    insertCard(database, {
+      id: 'count-matched-old',
+      rawInput: '同一份匹配初始稿',
+      categoryIds: [firstCategory[1]],
+      createdAt: '2026-07-15T08:00:00.000Z',
+    });
+    insertCard(database, {
+      id: 'count-matched-new',
+      rawInput: '同一份匹配初始稿',
+      categoryIds: [firstCategory[1]],
+      createdAt: '2026-07-15T09:00:00.000Z',
+    });
+    insertCard(database, {
+      id: 'count-second-source',
+      rawInput: '另一份匹配初始稿',
+      categoryIds: [firstCategory[0]],
+      createdAt: '2026-07-15T10:00:00.000Z',
+    });
+    insertCard(database, {
+      id: 'count-other-category',
+      rawInput: '未选板块初始稿',
+      categoryIds: secondCategory,
+      createdAt: '2026-07-15T10:00:00.000Z',
+    });
+    insertCard(database, {
+      id: 'count-archived',
+      rawInput: '已归档初始稿',
+      categoryIds: firstCategory,
+      archived: true,
+      createdAt: '2026-07-15T10:00:00.000Z',
+    });
+    insertCard(database, {
+      id: 'count-empty',
+      rawInput: '   ',
+      categoryIds: firstCategory,
+      createdAt: '2026-07-15T10:00:00.000Z',
+    });
+    insertCard(database, {
+      id: 'count-outside-date',
+      rawInput: '日期外初始稿',
+      categoryIds: firstCategory,
+      createdAt: '2026-07-16T00:00:00.000Z',
+    });
+
+    const response = await request(app)
+      .get('/api/cards/random-original/count')
+      .query({ categoryIds: firstCategory[0], createdFrom: '2026-07-15', createdTo: '2026-07-15' });
+
+    expect(response.status).toBe(200);
+    expect(response.body).toEqual({ totalAvailable: 2 });
+  });
+
+  it.each([
+    ['非法日期', { createdTo: '2026-02-31' }],
+    ['反向日期范围', { createdFrom: '2026-07-18', createdTo: '2026-07-17' }],
+    ['重复日期标量', { createdTo: ['2026-07-17', '2026-07-18'] }],
+    ['未知参数', { unexpected: 'value' }],
+  ])('随机初始稿计数拒绝%s并返回安全的 400', async (_name, query) => {
+    const { app } = setup();
+
+    const response = await request(app).get('/api/cards/random-original/count').query(query);
+
+    expect(response.status).toBe(400);
+    expect(response.body).toEqual({ code: 'invalid_request', message: expect.any(String) });
+    expect(JSON.stringify(response.body)).not.toMatch(/SQL|\\\\|AAA错题/i);
+  });
+
+  it.each([
+    ['非法日期', { createdFrom: '2026-02-31' }],
+    ['反向日期范围', { createdFrom: '2026-07-18', createdTo: '2026-07-17' }],
+    ['重复日期标量', { createdFrom: ['2026-07-17', '2026-07-18'] }],
+    ['未知参数', { unexpected: 'value' }],
+  ])('随机初始稿拒绝%s并返回安全的 400', async (_name, query) => {
+    const { app } = setup();
+
+    const response = await request(app).get('/api/cards/random-original').query(query);
+
+    expect(response.status).toBe(400);
+    expect(response.body).toEqual({ code: 'invalid_request', message: expect.any(String) });
+    expect(JSON.stringify(response.body)).not.toMatch(/SQL|\\\\|AAA错题/i);
+  });
+
+  it('rejects invalid position requests and rolls back a failed positioning transaction', async () => {
+    const { app, database } = setup();
+    insertCard(database, { id: 'position-a' });
+    insertCard(database, { id: 'position-b' });
+    database.db.exec(`
+      CREATE TRIGGER reject_position_b
+      BEFORE UPDATE OF manual_order ON cards
+      WHEN NEW.id = 'position-b'
+      BEGIN
+        SELECT RAISE(ABORT, 'private manual order detail');
+      END
+    `);
+
+    for (const body of [
+      { ids: ['position-a'] },
+      { ids: ['position-a'], position: 'middle' },
+      { ids: ['position-a'], position: 'top', extra: true },
+    ]) {
+      expect((await request(app).patch('/api/cards/bulk').send(body)).status).toBe(400);
+    }
+
+    const failed = await request(app)
+      .patch('/api/cards/bulk')
+      .send({ ids: ['position-a', 'position-b'], position: 'top' });
+    expect(failed.status).toBe(500);
+    expect(JSON.stringify(failed.body)).not.toContain('private manual order detail');
+    expect(
+      database.db.prepare("SELECT id, manual_order FROM cards WHERE id LIKE 'position-%' ORDER BY id").all(),
+    ).toEqual([
+      { id: 'position-a', manual_order: 0 },
+      { id: 'position-b', manual_order: 0 },
     ]);
   });
 
   it.each([
-    [{ ids: [], rating: 3 }],
+    [{ ids: [], archived: true }],
     [{ ids: ['a'] }],
-    [{ ids: ['a'], rating: 3, extra: true }],
-    [{ ids: ['a'], rating: 6 }],
+    [{ ids: ['a'], archived: true, extra: true }],
+    [{ ids: ['a'], rating: 3 }],
   ])('严格拒绝非法批量请求 %#', async (body) => {
     const { app } = setup();
     const response = await request(app).patch('/api/cards/bulk').send(body);
@@ -642,6 +1106,18 @@ describe('卡片查询、管理与批量操作', () => {
       `)
       .run(fixedNow.toISOString(), fixedNow.toISOString(), fixedNow.toISOString());
     writeFileSync(attachmentPath, Buffer.from('png'));
+
+    const rejected = await request(app).delete('/api/cards/delete-me');
+
+    expect(rejected.status).toBe(409);
+    expect(rejected.body).toMatchObject({ code: 'invalid_state' });
+    expect(JSON.stringify(rejected.body)).not.toContain(attachmentPath);
+    expect(database.db.prepare('SELECT COUNT(*) AS count FROM cards').get()).toEqual({ count: 1 });
+    expect(database.db.prepare('SELECT COUNT(*) AS count FROM attachments').get()).toEqual({ count: 1 });
+    expect(existsSync(attachmentPath)).toBe(true);
+
+    const archived = await request(app).patch('/api/cards/delete-me').send({ archived: true });
+    expect(archived.status).toBe(200);
 
     const response = await request(app).delete('/api/cards/delete-me');
 

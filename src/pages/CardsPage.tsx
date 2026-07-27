@@ -1,27 +1,59 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
   Archive,
+  ArchiveRestore,
+  ArrowDownToLine,
+  ArrowUpToLine,
   ChevronLeft,
   ChevronRight,
+  Download,
   Eye,
+  FolderCheck,
+  FolderPlus,
+  LoaderCircle,
   Pencil,
   RefreshCw,
   Search,
   Trash2,
   X,
 } from 'lucide-react';
+import { animate } from 'motion';
+import { createPortal } from 'react-dom';
 import { Link, useSearchParams } from 'react-router-dom';
 import type {
   AiStatus,
   BulkCardUpdateInput,
   CardDetail,
+  CardFolderContents,
+  CardFolderSummary,
   CardSearchResult,
 } from '../../shared/contracts';
-import { api } from '../api/client';
+import { api, apiBlob } from '../api/client';
+import {
+  CARD_GROUP_DRAG_TYPE,
+  CardFolderShelf,
+  type CardFolderCardGroup,
+} from '../components/CardFolderShelf';
+import { MathText } from '../components/MathText';
+import { RichTextPreview } from '../components/RichTextPreview';
 import { StatusNotice } from '../components/StatusNotice';
+import {
+  criticalSpring,
+  momentumSpring,
+  projectMomentum,
+  rubberBand,
+  selectProjectedSnap,
+} from '../motion/liquidMotion';
+import '../styles/cards-glass.css';
 
 type LoadState = 'loading' | 'ready' | 'error';
+type CardContentVersion = 'optimized' | 'original';
+
+const DRAWER_EXIT_VELOCITY_LIMIT = 1200;
+type CardGroup = CardFolderCardGroup;
+
 interface FilterState {
+  contentVersion: CardContentVersion;
   query: string;
   categoryIds: string[];
   tagIds: string[];
@@ -45,16 +77,88 @@ export function CardsPage() {
   const hasDeprecatedFilters = searchParams.has('rating') || searchParams.has('mastery');
   const filters = useMemo(() => readFilters(searchParams), [searchParams]);
   const [queryDraft, setQueryDraft] = useState(filters.query);
+  const contentVersion = filters.contentVersion;
   const [result, setResult] = useState<CardSearchResult>();
   const [loadState, setLoadState] = useState<LoadState>('loading');
+  const [folders, setFolders] = useState<CardFolderSummary[]>([]);
+  const [folderListState, setFolderListState] = useState<LoadState>('loading');
+  const [folderListError, setFolderListError] = useState('');
+  const [activeFolderId, setActiveFolderId] = useState<string>();
+  const [activeFolderContents, setActiveFolderContents] = useState<CardFolderContents>();
+  const [folderContentState, setFolderContentState] = useState<LoadState>('ready');
+  const [folderContentError, setFolderContentError] = useState('');
+  const [folderActionName, setFolderActionName] = useState('');
+  const [folderActionError, setFolderActionError] = useState('');
   const [selected, setSelected] = useState<Set<string>>(() => new Set());
-  const [detail, setDetail] = useState<CardDetail>();
+  const [detailGroup, setDetailGroup] = useState<CardGroup>();
   const [bulkTags, setBulkTags] = useState('');
   const [actionName, setActionName] = useState('');
   const [actionError, setActionError] = useState('');
+  const [exporting, setExporting] = useState(false);
+  const [exportError, setExportError] = useState('');
+  const [archiveUndo, setArchiveUndo] = useState<{ ids: string[]; message: string }>();
   const [reloadKey, setReloadKey] = useState(0);
   const requestVersion = useRef(0);
+  const folderRequestVersion = useRef(0);
+  const folderContentRequestVersion = useRef(0);
+  const activeFolderIdRef = useRef<string>();
   const detailTrigger = useRef<HTMLButtonElement | null>(null);
+
+  const loadFolders = useCallback(async (signal?: AbortSignal) => {
+    const version = ++folderRequestVersion.current;
+    setFolderListState('loading');
+    setFolderListError('');
+    try {
+      const nextFolders = await api<CardFolderSummary[]>('/api/cards/folders', { signal });
+      if (version !== folderRequestVersion.current) return;
+      setFolders(nextFolders);
+      setFolderListState('ready');
+    } catch (error: unknown) {
+      if (version !== folderRequestVersion.current || isAbortError(error)) return;
+      setFolderListState('error');
+      setFolderListError('文件夹加载失败，请稍后重试');
+    }
+  }, []);
+
+  const loadFolderContents = useCallback(async (folderId: string, signal?: AbortSignal) => {
+    const version = ++folderContentRequestVersion.current;
+    setFolderContentState('loading');
+    setFolderContentError('');
+    try {
+      const contents = await api<CardFolderContents>(`/api/cards/folders/${folderId}/cards`, { signal });
+      if (version !== folderContentRequestVersion.current || activeFolderIdRef.current !== folderId) return;
+      setActiveFolderContents(contents);
+      setFolderContentState('ready');
+    } catch (error: unknown) {
+      if (
+        version !== folderContentRequestVersion.current
+        || activeFolderIdRef.current !== folderId
+        || isAbortError(error)
+      ) return;
+      setFolderContentState('error');
+      setFolderContentError('文件夹内容加载失败，请稍后重试');
+    }
+  }, []);
+
+  useEffect(() => {
+    if (contentVersion !== 'original') {
+      folderRequestVersion.current += 1;
+      folderContentRequestVersion.current += 1;
+      activeFolderIdRef.current = undefined;
+      setActiveFolderId(undefined);
+      setActiveFolderContents(undefined);
+      setFolderContentState('ready');
+      setFolderContentError('');
+      return;
+    }
+
+    activeFolderIdRef.current = undefined;
+    setActiveFolderId(undefined);
+    setActiveFolderContents(undefined);
+    const controller = new AbortController();
+    void loadFolders(controller.signal);
+    return () => controller.abort();
+  }, [contentVersion, loadFolders]);
 
   useEffect(() => {
     if (!hasDeprecatedFilters) return;
@@ -107,25 +211,45 @@ export function CardsPage() {
     updateSearchParams(setSearchParams, filters, { ...patch, page: patch.page ?? 1 });
   };
 
+  const selectContentVersion = (nextVersion: CardContentVersion) => {
+    if (nextVersion === contentVersion) return;
+    updateSearchParams(setSearchParams, filters, { contentVersion: nextVersion, page: 1 });
+  };
+
   const refresh = () => setReloadKey((current) => current + 1);
 
-  const openDetail = (card: CardDetail, trigger: HTMLButtonElement) => {
+  const exportExcel = async () => {
+    if (exporting) return;
+    setExporting(true);
+    setExportError('');
+    try {
+      const blob = await apiBlob('/api/cards/export');
+      downloadBlob(blob, `gongkao-original-content-${timestampForFileName(new Date())}.xlsx`);
+    } catch {
+      setExportError('导出失败，请稍后重试');
+    } finally {
+      setExporting(false);
+    }
+  };
+
+  const openDetail = (group: CardGroup, trigger: HTMLButtonElement) => {
     detailTrigger.current = trigger;
-    setDetail(card);
+    setDetailGroup(group);
   };
 
   const closeDetail = useCallback(() => {
-    setDetail(undefined);
+    setDetailGroup(undefined);
     detailTrigger.current?.focus();
     detailTrigger.current = null;
   }, []);
 
-  const runAction = async (name: string, action: () => Promise<unknown>) => {
+  const runAction = async (name: string, action: () => Promise<unknown>, onSuccess?: () => void) => {
     if (actionName) return;
     setActionName(name);
     setActionError('');
     try {
       await action();
+      onSuccess?.();
       setSelected(new Set());
       refresh();
     } catch {
@@ -135,51 +259,240 @@ export function CardsPage() {
     }
   };
 
-  const bulkUpdate = (name: string, update: BulkCardUpdateInput) =>
+  const bulkUpdate = (name: string, update: BulkCardUpdateInput, onSuccess?: () => void) =>
     runAction(name, () =>
       api<{ updated: number }>('/api/cards/bulk', {
         method: 'PATCH',
         body: JSON.stringify({ ids: [...selected], ...update }),
       }),
+      onSuccess,
     );
 
-  const archiveCard = (cardId: string) =>
-    runAction(`archive:${cardId}`, () =>
+  const setCardArchived = (cardId: string, archived: boolean) =>
+    runAction(`${archived ? 'archive' : 'restore'}:${cardId}`, () =>
       api<CardDetail>(`/api/cards/${cardId}`, {
         method: 'PATCH',
-        body: JSON.stringify({ archived: true }),
+        body: JSON.stringify({ archived }),
+      }),
+      () => {
+        setArchiveUndo(archived ? { ids: [cardId], message: '已归档 1 张卡片' } : undefined);
+      },
+    );
+
+  const retryCardAi = (cardId: string) =>
+    runAction(`retry-ai:${cardId}`, () =>
+      api<CardDetail>(`/api/cards/${cardId}/retry-ai`, {
+        method: 'POST',
+        body: JSON.stringify({}),
       }),
     );
 
-  const deleteCard = (card: CardDetail) => {
-    if (!window.confirm(`确认永久删除“${card.normalizedStatement || '待生成知识点'}”？此操作不可撤销。`)) return;
-    void runAction(`delete:${card.id}`, () =>
-      api<void>(`/api/cards/${card.id}`, { method: 'DELETE' }),
+  const bulkSetArchived = (archived: boolean) => {
+    const ids = [...selected];
+    return bulkUpdate(
+      archived ? 'bulk-archive' : 'bulk-restore',
+      { archived },
+      () => {
+        setArchiveUndo(archived ? { ids, message: `已归档 ${ids.length} 张卡片` } : undefined);
+      },
     );
   };
 
+  const undoArchive = (ids: string[]) =>
+    runAction('undo-archive', () =>
+      api<{ updated: number }>('/api/cards/bulk', {
+        method: 'PATCH',
+        body: JSON.stringify({ ids, archived: false }),
+      }),
+      () => setArchiveUndo(undefined),
+    );
+
+  const setCardsArchived = (cards: CardDetail[], archived: boolean) => {
+    const ids = cards.map(({ id }) => id);
+    if (ids.length === 1) return setCardArchived(ids[0], archived);
+    return runAction(
+      (archived ? 'archive' : 'restore') + ':' + ids[0],
+      () => api<{ updated: number }>('/api/cards/bulk', {
+        method: 'PATCH',
+        body: JSON.stringify({ ids, archived }),
+      }),
+      () => setArchiveUndo(archived ? { ids, message: '已归档 ' + ids.length + ' 张卡片' } : undefined),
+    );
+  };
+
+  const setCardsPosition = (cards: CardDetail[], position: 'top' | 'bottom') =>
+    runAction(
+      `position:${position}:${cards[0]?.id}`,
+      () => api<{ updated: number }>('/api/cards/bulk', {
+        method: 'PATCH',
+        body: JSON.stringify({ ids: cards.map(({ id }) => id), position }),
+      }),
+    );
+
+  const retryCardsAi = (cards: CardDetail[]) => {
+    if (cards.length === 1) return retryCardAi(cards[0].id);
+    return runAction(
+      'retry-ai:' + cards[0].id,
+      () => Promise.all(cards.map(({ id }) => api<CardDetail>('/api/cards/' + id + '/retry-ai', {
+        method: 'POST',
+        body: JSON.stringify({}),
+      }))),
+    );
+  };
+
+  const deleteCards = (cards: CardDetail[]) => {
+    const title = cards[0]?.normalizedStatement || '待生成知识点';
+    const suffix = cards.length > 1 ? '（连同 ' + (cards.length - 1) + ' 张衍生卡片）' : '';
+    if (!window.confirm('确认彻底删除“' + title + '”' + suffix + '？此操作不可撤销。')) return;
+    void runAction(
+      'delete:' + cards[0]?.id,
+      () => Promise.all(cards.map(({ id }) => api<void>('/api/cards/' + id, { method: 'DELETE' }))),
+    );
+  };
+  const createFolder = async (name: string) => {
+    if (folderActionName) return false;
+    setFolderActionName('create-folder');
+    setFolderActionError('');
+    try {
+      const created = await api<CardFolderSummary>('/api/cards/folders', {
+        method: 'POST',
+        body: JSON.stringify({ name }),
+      });
+      setFolders((current) => [...current, created]);
+      setFolderListState('ready');
+      return true;
+    } catch {
+      setFolderActionError('创建文件夹失败，请稍后重试');
+      return false;
+    } finally {
+      setFolderActionName('');
+    }
+  };
+
+  const toggleFolder = (folderId: string) => {
+    setFolderActionError('');
+    if (activeFolderId === folderId) {
+      folderContentRequestVersion.current += 1;
+      activeFolderIdRef.current = undefined;
+      setActiveFolderId(undefined);
+      setActiveFolderContents(undefined);
+      setFolderContentState('ready');
+      setFolderContentError('');
+      return;
+    }
+    activeFolderIdRef.current = folderId;
+    setActiveFolderId(folderId);
+    setActiveFolderContents(undefined);
+    void loadFolderContents(folderId);
+  };
+
+  const deleteFolder = async (folder: CardFolderSummary) => {
+    if (folderActionName) return;
+    if (!window.confirm(`确认删除文件夹“${folder.name}”？只删除文件夹，不会删除卡片。`)) return;
+    setFolderActionName('delete-folder:' + folder.id);
+    setFolderActionError('');
+    try {
+      await api<void>('/api/cards/folders/' + folder.id, { method: 'DELETE' });
+      setFolders((current) => current.filter(({ id }) => id !== folder.id));
+      if (activeFolderId === folder.id) {
+        folderContentRequestVersion.current += 1;
+        activeFolderIdRef.current = undefined;
+        setActiveFolderId(undefined);
+        setActiveFolderContents(undefined);
+        setFolderContentState('ready');
+        setFolderContentError('');
+      }
+    } catch {
+      setFolderActionError('删除文件夹失败，请稍后重试');
+    } finally {
+      setFolderActionName('');
+    }
+  };
+
+  const addCardsToFolder = async (folderId: string, cardIds: string[]) => {
+    if (folderActionName) return;
+    setFolderActionName('add-folder:' + folderId);
+    setFolderActionError('');
+    try {
+      await api<CardFolderSummary>(`/api/cards/folders/${folderId}/cards`, {
+        method: 'POST',
+        body: JSON.stringify({ cardIds }),
+      });
+      const refreshes: Array<Promise<void>> = [loadFolders()];
+      const currentFolderId = activeFolderIdRef.current;
+      if (currentFolderId) refreshes.push(loadFolderContents(currentFolderId));
+      await Promise.all(refreshes);
+    } catch {
+      setFolderActionError('加入文件夹失败，请稍后重试');
+    } finally {
+      setFolderActionName('');
+    }
+  };
+
+  const removeCardsFromFolder = async (folderId: string, cards: CardDetail[]) => {
+    if (folderActionName || cards.length === 0) return;
+    setFolderActionName('remove-folder-card:' + cards[0].id);
+    setFolderActionError('');
+    try {
+      await api<CardFolderSummary>(`/api/cards/folders/${folderId}/cards`, {
+        method: 'DELETE',
+        body: JSON.stringify({ cardIds: cards.map(({ id }) => id) }),
+      });
+      await Promise.all([loadFolders(), loadFolderContents(folderId)]);
+    } catch {
+      setFolderActionError('移出文件夹失败，请稍后重试');
+    } finally {
+      setFolderActionName('');
+    }
+  };
+
   const totalPages = Math.max(1, Math.ceil((result?.total ?? 0) / filters.pageSize));
+  const visibleGroups = useMemo(
+    () => contentVersion === 'original'
+      ? groupCards(result?.items ?? [])
+      : (result?.items ?? []).map(cardToGroup),
+    [contentVersion, result?.items],
+  );
+  const activeFolderGroups = useMemo(
+    () => groupCards(activeFolderContents?.cards ?? []),
+    [activeFolderContents?.cards],
+  );
 
   return (
     <section className="page cards-page">
       <header className="page__header cards-page__header">
         <div>
           <h1 className="page__title">卡片库</h1>
-          <span className="cards-page__count">共 {result?.total ?? 0} 张</span>
+          <span className="cards-page__count">
+            {contentVersion === 'original'
+              ? `当前页 ${visibleGroups.length} 份初始稿 · 共 ${result?.total ?? 0} 份`
+              : `共 ${result?.total ?? 0} 张`}
+          </span>
         </div>
-        <button
-          aria-label="重新加载"
-          className="cards-icon-button"
-          disabled={loadState === 'loading'}
-          onClick={refresh}
-          title="重新加载"
-          type="button"
-        >
-          <RefreshCw aria-hidden="true" className={loadState === 'loading' ? 'is-spinning' : undefined} size={17} />
-        </button>
+        <div className="cards-page__actions">
+          <button
+            className="button button--secondary cards-export-button liquid-pressable"
+            disabled={exporting}
+            onClick={() => void exportExcel()}
+            type="button"
+          >
+            {exporting ? <LoaderCircle aria-hidden="true" className="is-spinning" size={17} /> : <Download aria-hidden="true" size={17} />}
+            导出原始内容
+          </button>
+          <button
+            aria-label="重新加载"
+            className="cards-icon-button liquid-pressable"
+            disabled={loadState === 'loading'}
+            onClick={refresh}
+            title="重新加载"
+            type="button"
+          >
+            <RefreshCw aria-hidden="true" className={loadState === 'loading' ? 'is-spinning' : undefined} size={17} />
+          </button>
+        </div>
       </header>
 
-      <div className="cards-filters" aria-label="卡片筛选">
+      <div className="cards-filters liquid-glass liquid-glass--regular" aria-label="卡片筛选">
         <label className="cards-filter cards-filter--search">
           <span>搜索</span>
           <div className="cards-filter__search-control">
@@ -219,44 +532,103 @@ export function CardsPage() {
         </FilterSelect>
       </div>
 
+      <div aria-label="内容版本" className="cards-content-version liquid-glass liquid-glass--thin" role="group">
+        <button
+          aria-pressed={contentVersion === 'optimized'}
+          className={`liquid-pressable${contentVersion === 'optimized' ? ' is-selected' : ''}`}
+          onClick={() => selectContentVersion('optimized')}
+          type="button"
+        >
+          AI 优化稿
+        </button>
+        <button
+          aria-pressed={contentVersion === 'original'}
+          className={`liquid-pressable${contentVersion === 'original' ? ' is-selected' : ''}`}
+          onClick={() => selectContentVersion('original')}
+          type="button"
+        >
+          用户初始稿
+        </button>
+      </div>
+      {contentVersion === 'original' ? (
+        <CardFolderShelf
+          actionError={folderActionError}
+          actionName={folderActionName}
+          activeFolderId={activeFolderId}
+          activeGroups={activeFolderGroups}
+          contentError={folderContentError}
+          contentState={folderContentState}
+          folders={folders}
+          listError={folderListError}
+          listState={folderListState}
+          onAddCards={(folderId, cardIds) => void addCardsToFolder(folderId, cardIds)}
+          onCreate={createFolder}
+          onDelete={(folder) => void deleteFolder(folder)}
+          onDetail={openDetail}
+          onRemoveCards={(folderId, cardIds) => {
+            const cards = activeFolderGroups
+              .flatMap((group) => group.cards)
+              .filter(({ id }) => cardIds.includes(id));
+            void removeCardsFromFolder(folderId, cards);
+          }}
+          onToggle={toggleFolder}
+        />
+      ) : null}
       {selected.size > 0 ? (
-        <div className="cards-bulk" aria-label="批量操作">
+        <div className="cards-bulk liquid-glass liquid-glass--regular" aria-label="批量操作">
           <strong>已选 {selected.size} 张</strong>
           <label className="cards-bulk__tags">
             <span className="sr-only">批量标签</span>
             <input aria-label="批量标签" disabled={Boolean(actionName)} onChange={(event) => setBulkTags(event.target.value)} placeholder="逗号分隔标签" value={bulkTags} />
           </label>
-          <button disabled={Boolean(actionName) || splitNames(bulkTags).length === 0} onClick={() => void bulkUpdate('bulk-tags', { tags: splitNames(bulkTags) })} type="button">批量添加标签</button>
-          <button disabled={Boolean(actionName)} onClick={() => void bulkUpdate('bulk-archive', { archived: true })} type="button">批量归档</button>
+          <button className="liquid-pressable" disabled={Boolean(actionName) || splitNames(bulkTags).length === 0} onClick={() => void bulkUpdate('bulk-tags', { tags: splitNames(bulkTags) })} type="button">批量添加标签</button>
+          <button className="liquid-pressable" disabled={Boolean(actionName)} onClick={() => void bulkSetArchived(filters.archived !== 'true')} type="button">
+            {filters.archived === 'true' ? '批量恢复归档' : '批量归档'}
+          </button>
+        </div>
+      ) : null}
+
+      {archiveUndo ? (
+        <div className="cards-action-success" role="status">
+          <span>{archiveUndo.message}</span>
+          <button className="liquid-pressable" disabled={Boolean(actionName)} onClick={() => void undoArchive(archiveUndo.ids)} type="button">撤销归档</button>
         </div>
       ) : null}
 
       {actionError ? <div className="cards-action-error" role="alert">{actionError}</div> : null}
+      {exportError ? <div className="cards-action-error" role="alert">{exportError}</div> : null}
 
       {loadState === 'loading' ? <StatusNotice state="loading" message="正在加载卡片" /> : null}
       {loadState === 'error' ? (
         <div className="cards-state">
           <StatusNotice state="error" message="卡片加载失败，请稍后重试" />
-          <button className="button button--secondary" onClick={refresh} type="button">重新加载</button>
+          <button className="button button--secondary liquid-pressable" onClick={refresh} type="button">重新加载</button>
         </div>
       ) : null}
       {loadState === 'ready' && result?.items.length === 0 ? <StatusNotice state="empty" message="暂无符合条件的卡片" /> : null}
       {loadState === 'ready' && result && result.items.length > 0 ? (
-        <CardTable
+        <CardGrid
           actionName={actionName}
-          cards={result.items}
-          onArchive={archiveCard}
-          onDelete={deleteCard}
+          canDelete={filters.archived === 'true'}
+          groups={visibleGroups}
+          contentVersion={contentVersion}
+          folderActionName={folderActionName}
+          folders={folders}
+          onAddToFolder={(folderId, cardIds) => void addCardsToFolder(folderId, cardIds)}
+          onArchivedChange={setCardsArchived}
+          onDelete={deleteCards}
           onDetail={openDetail}
-          onSelect={(cardId, checked) => setSelected((current) => toggleSet(current, cardId, checked))}
+          onPositionChange={setCardsPosition}
+          onRetryAi={retryCardsAi}
+          onSelect={(cardIds, checked) => setSelected((current) => toggleSet(current, cardIds, checked))}
           selected={selected}
         />
       ) : null}
 
-      <div className="cards-pagination" aria-label="卡片分页">
+      <div className="cards-pagination liquid-glass liquid-glass--thin" aria-label="卡片分页">
         <button
           aria-label="上一页"
-          className="cards-icon-button"
+          className="cards-icon-button liquid-pressable"
           disabled={filters.page <= 1 || loadState === 'loading'}
           onClick={() => setFilter({ page: filters.page - 1 })}
           title="上一页"
@@ -267,7 +639,7 @@ export function CardsPage() {
         <span>{loadState === 'loading' ? '加载中' : `第 ${filters.page} / ${totalPages} 页`}</span>
         <button
           aria-label="下一页"
-          className="cards-icon-button"
+          className="cards-icon-button liquid-pressable"
           disabled={filters.page >= totalPages || loadState === 'loading'}
           onClick={() => setFilter({ page: filters.page + 1 })}
           title="下一页"
@@ -277,83 +649,422 @@ export function CardsPage() {
         </button>
       </div>
 
-      {detail ? <CardDetailDrawer card={detail} onClose={closeDetail} /> : null}
+      {detailGroup ? <CardDetailDrawer group={detailGroup} onClose={closeDetail} /> : null}
     </section>
   );
 }
 
-function CardTable({
+function CardGrid({
   actionName,
-  cards,
-  onArchive,
+  canDelete,
+  groups,
+  contentVersion,
+  folderActionName,
+  folders,
+  onAddToFolder,
+  onArchivedChange,
   onDelete,
   onDetail,
+  onPositionChange,
+  onRetryAi,
   onSelect,
   selected,
 }: {
   actionName: string;
-  cards: CardDetail[];
-  onArchive: (cardId: string) => void;
-  onDelete: (card: CardDetail) => void;
-  onDetail: (card: CardDetail, trigger: HTMLButtonElement) => void;
-  onSelect: (cardId: string, selected: boolean) => void;
+  canDelete: boolean;
+  groups: CardGroup[];
+  contentVersion: CardContentVersion;
+  folderActionName: string;
+  folders: CardFolderSummary[];
+  onAddToFolder: (folderId: string, cardIds: string[]) => void;
+  onArchivedChange: (cards: CardDetail[], archived: boolean) => void;
+  onDelete: (cards: CardDetail[]) => void;
+  onDetail: (group: CardGroup, trigger: HTMLButtonElement) => void;
+  onPositionChange: (cards: CardDetail[], position: 'top' | 'bottom') => void;
+  onRetryAi: (cards: CardDetail[]) => void;
+  onSelect: (cardIds: string[], selected: boolean) => void;
   selected: Set<string>;
 }) {
   return (
-    <div className="cards-table-wrap">
-      <table className="cards-table">
-        <colgroup>
-          <col className="cards-table__select" />
-          <col className="cards-table__knowledge" />
-          <col className="cards-table__category" />
-          <col className="cards-table__wrong" />
-          <col className="cards-table__due" />
-          <col className="cards-table__actions" />
-        </colgroup>
-        <thead>
-          <tr>
-            {['选择', '知识点', '板块', '不会标注', '下次复习', '操作'].map((label) => <th key={label} scope="col">{label}</th>)}
-          </tr>
-        </thead>
-        <tbody>
-          {cards.map((card) => {
-            const title = card.normalizedStatement || '待生成知识点';
-            return (
-              <tr key={card.id}>
-                <td>
-                  <input
-                    aria-label={`选择${title}`}
-                    checked={selected.has(card.id)}
-                    onChange={(event) => onSelect(card.id, event.target.checked)}
-                    type="checkbox"
-                  />
-                </td>
-                <td>
-                  <div className="cards-table__knowledge-main" title={title}>{title}</div>
-                  {card.aiStatus !== 'ready' ? <span className={`cards-status cards-status--${card.aiStatus}`}>{aiStatusLabels[card.aiStatus]}</span> : null}
-                </td>
-                <td>{primaryCategoryNames(card).join('、') || '未分类'}</td>
-                <td><span aria-label={`不会标注 ${card.wrongCount} 次`}>{card.wrongCount}</span></td>
-                <td>{nextDueText(card)}</td>
-                <td>
-                  <div className="cards-row-actions">
-                    <button aria-label={`查看${title}详情`} onClick={(event) => onDetail(card, event.currentTarget)} title="查看详情" type="button"><Eye aria-hidden="true" size={16} /></button>
-                    <Link aria-label={`编辑${title}`} title="编辑" to={`/entry?edit=${encodeURIComponent(card.id)}`}><Pencil aria-hidden="true" size={16} /></Link>
-                    <button aria-label={`归档${title}`} disabled={Boolean(actionName)} onClick={() => onArchive(card.id)} title="归档" type="button"><Archive aria-hidden="true" size={16} /></button>
-                    <button aria-label={`删除${title}`} disabled={Boolean(actionName)} onClick={() => onDelete(card)} title="删除" type="button"><Trash2 aria-hidden="true" size={16} /></button>
-                  </div>
-                </td>
-              </tr>
-            );
-          })}
-        </tbody>
-      </table>
-    </div>
+    <ul aria-label="卡片列表" className="cards-grid">
+      {groups.map((group) => {
+        const card = group.card;
+        const title = card.normalizedStatement || '待生成知识点';
+        const content = contentVersion === 'original'
+          ? card.rawInput || '未填写原始内容'
+          : title;
+        const groupIds = group.cards.map(({ id }) => id);
+        const groupIdSet = new Set(groupIds);
+        const assignedFolders = contentVersion === 'original'
+          ? folders.filter((folder) => folder.cardIds.some((id) => groupIdSet.has(id)))
+          : [];
+        const groupSelected = groupIds.every((id) => selected.has(id));
+        const isDerivedGroup = group.cards.length > 1;
+        const groupWrongCount = Math.max(...group.cards.map(({ wrongCount }) => wrongCount));
+        const editPath = contentVersion === 'original'
+          ? card.archived ? undefined : `/entry?editOriginal=${encodeURIComponent(card.id)}`
+          : isDerivedGroup ? undefined : `/entry?edit=${encodeURIComponent(card.id)}`;
+        const editLabel = contentVersion === 'original' ? '编辑初始稿' : '编辑';
+        return (
+          <li
+            className="cards-card liquid-glass liquid-glass--regular"
+            draggable={contentVersion === 'original' ? true : undefined}
+            key={card.id}
+            onDragStart={contentVersion === 'original'
+              ? (event) => {
+                event.dataTransfer.effectAllowed = 'copy';
+                event.dataTransfer.setData(CARD_GROUP_DRAG_TYPE, JSON.stringify(groupIds));
+              }
+              : undefined}
+          >
+            <div className="cards-card__preview">
+              <div className="cards-card__status">
+                <span>{contentVersion === 'original' ? '用户初始稿' : 'AI 优化稿'}</span>
+                {isDerivedGroup ? <span className="cards-card__group-count">衍生 {group.cards.length} 个问题</span> : null}
+                {card.aiStatus !== 'ready' ? <span className={'cards-status cards-status--' + card.aiStatus}>{aiStatusLabels[card.aiStatus]}</span> : null}
+              </div>
+              {assignedFolders.length > 0 ? (
+                <div
+                  aria-label={'已加入文件夹：' + assignedFolders.map(({ name }) => name).join('、')}
+                  className="cards-card__folder-memberships"
+                >
+                  <FolderCheck aria-hidden="true" size={14} />
+                  {assignedFolders.map((folder) => (
+                    <span className="cards-card__folder-chip" key={folder.id}>{folder.name}</span>
+                  ))}
+                </div>
+              ) : null}
+              <h2 className="cards-card__title" title={content}>
+                {contentVersion === 'optimized'
+                  ? <MathText text={content} />
+                  : <RichTextPreview contentJson={card.rawContentJson} fallback={content} />}
+              </h2>
+            </div>
+            <dl className="cards-card__meta">
+              <div>
+                <dt>板块</dt>
+                <dd>{primaryCategoryNames(card).join('、') || '未分类'}</dd>
+              </div>
+              <div>
+                <dt>{isDerivedGroup ? '最高不会标注' : '不会标注'}</dt>
+                <dd><span aria-label={'不会标注 ' + groupWrongCount + ' 次'}>{groupWrongCount} 次</span></dd>
+              </div>
+              <div>
+                <dt>下次复习</dt>
+                <dd>{nextDueText(card)}</dd>
+              </div>
+            </dl>
+            <div className="cards-card__footer">
+              <label className="cards-card__select liquid-pressable">
+                <input
+                  aria-label={'选择' + title}
+                  checked={groupSelected}
+                  onChange={(event) => onSelect(groupIds, event.target.checked)}
+                  type="checkbox"
+                />
+                <span>选择</span>
+              </label>
+              {contentVersion === 'original' && folders.length > 0 ? (
+                <label className="cards-folder-picker">
+                  <FolderPlus aria-hidden="true" size={16} />
+                  <select
+                    aria-label={'将' + title + '加入文件夹'}
+                    disabled={Boolean(folderActionName)}
+                    onChange={(event) => {
+                      const folderId = event.currentTarget.value;
+                      if (folderId) onAddToFolder(folderId, groupIds);
+                    }}
+                    title="加入文件夹"
+                    value=""
+                  >
+                    <option value="">加入文件夹</option>
+                    {folders.map((folder) => <option key={folder.id} value={folder.id}>{folder.name}</option>)}
+                  </select>
+                </label>
+              ) : null}
+              <div className="cards-row-actions">
+                <button aria-label={'查看' + title + '详情'} className="liquid-pressable" onClick={(event) => onDetail(group, event.currentTarget)} title="查看详情" type="button"><Eye aria-hidden="true" size={16} /></button>
+                <button
+                  aria-label={'置顶' + title}
+                  className="liquid-pressable"
+                  disabled={Boolean(actionName)}
+                  onClick={() => onPositionChange(group.cards, 'top')}
+                  title={'置顶' + title}
+                  type="button"
+                >
+                  {actionName === 'position:top:' + card.id ? <LoaderCircle aria-hidden="true" className="is-spinning" size={16} /> : <ArrowUpToLine aria-hidden="true" size={16} />}
+                </button>
+                <button
+                  aria-label={'置底' + title}
+                  className="liquid-pressable"
+                  disabled={Boolean(actionName)}
+                  onClick={() => onPositionChange(group.cards, 'bottom')}
+                  title={'置底' + title}
+                  type="button"
+                >
+                  {actionName === 'position:bottom:' + card.id ? <LoaderCircle aria-hidden="true" className="is-spinning" size={16} /> : <ArrowDownToLine aria-hidden="true" size={16} />}
+                </button>
+                {!isDerivedGroup && canRetryAi(card) ? (
+                  <button
+                    aria-label={'AI 修复' + title}
+                    className="liquid-pressable"
+                    disabled={Boolean(actionName)}
+                    onClick={() => onRetryAi(group.cards)}
+                    title="AI 修复"
+                    type="button"
+                  >
+                    {actionName === 'retry-ai:' + card.id ? <LoaderCircle aria-hidden="true" className="is-spinning" size={16} /> : <RefreshCw aria-hidden="true" size={16} />}
+                  </button>
+                ) : null}
+                {editPath ? <Link aria-label={editLabel + title} className="liquid-pressable" title={editLabel} to={editPath}><Pencil aria-hidden="true" size={16} /></Link> : null}
+                <button
+                  aria-label={(card.archived ? '恢复归档' : '归档') + title}
+                  className="liquid-pressable"
+                  disabled={Boolean(actionName)}
+                  onClick={() => onArchivedChange(group.cards, !card.archived)}
+                  title={card.archived ? '恢复归档' : '归档'}
+                  type="button"
+                >
+                  {card.archived ? <ArchiveRestore aria-hidden="true" size={16} /> : <Archive aria-hidden="true" size={16} />}
+                </button>
+                {canDelete ? <button aria-label={'彻底删除' + title} className="liquid-pressable" disabled={Boolean(actionName)} onClick={() => onDelete(group.cards)} title={'彻底删除' + title} type="button"><Trash2 aria-hidden="true" size={16} /></button> : null}
+              </div>
+            </div>
+          </li>
+        );
+      })}
+    </ul>
   );
 }
+function canRetryAi(card: CardDetail) {
+  return card.aiStatus === 'pending' || card.aiStatus === 'needs_input';
+}
 
-function CardDetailDrawer({ card, onClose }: { card: CardDetail; onClose: () => void }) {
+function CardDetailDrawer({ group, onClose }: { group: CardGroup; onClose: () => void }) {
+  const card = group.card;
   const dialogRef = useRef<HTMLElement>(null);
+  const headerRef = useRef<HTMLElement>(null);
+  const animationRef = useRef<{ stop: () => void } | null>(null);
+  const closeTimerRef = useRef<number>();
+  const closeCommittedRef = useRef(false);
+  const offsetRef = useRef(0);
+  const phaseRef = useRef<'opening' | 'idle' | 'dragging' | 'settling' | 'closing'>('opening');
+  const dragRef = useRef<{
+    committed: boolean;
+    history: Array<{ position: number; time: number }>;
+    pointerId: number;
+    startOffset: number;
+    startY: number;
+  } | null>(null);
+
+  const setDrawerOffset = useCallback((value: number) => {
+    const dialog = dialogRef.current;
+    if (!dialog) return;
+    offsetRef.current = value;
+    dialog.style.transform = `translate3d(0, ${value}px, 0)`;
+  }, []);
+
+  const setPhase = (phase: typeof phaseRef.current) => {
+    phaseRef.current = phase;
+    const dialog = dialogRef.current;
+    if (!dialog) return;
+    dialog.dataset.motionPhase = phase;
+    if (dialog.parentElement) dialog.parentElement.dataset.motionPhase = phase;
+  };
+
+  const clearCloseTimer = () => {
+    if (closeTimerRef.current === undefined) return;
+    window.clearTimeout(closeTimerRef.current);
+    closeTimerRef.current = undefined;
+  };
+
+  const stopAnimation = () => {
+    animationRef.current?.stop();
+    animationRef.current = null;
+  };
+
+  const drawerHeight = () => {
+    const dialog = dialogRef.current;
+    return Math.max(dialog?.getBoundingClientRect().height || dialog?.offsetHeight || 600, 1);
+  };
+
+  const animateDrawer = (
+    target: number,
+    velocity: number,
+    phase: 'opening' | 'settling' | 'closing',
+    onFinished: () => void,
+  ) => {
+    const currentOffset = offsetRef.current;
+    stopAnimation();
+    setPhase(phase);
+    let completed = false;
+    const finish = () => {
+      if (completed) return;
+      completed = true;
+      animationRef.current = null;
+      onFinished();
+    };
+    const spring = Math.abs(velocity) >= 80 ? momentumSpring : criticalSpring;
+    try {
+      const controls = animate(currentOffset, target, {
+        ...spring,
+        velocity,
+        onUpdate: setDrawerOffset,
+        onComplete: finish,
+      });
+      if (!completed) animationRef.current = controls;
+    } catch {
+      setDrawerOffset(target);
+      finish();
+    }
+  };
+
+  const releaseDragCapture = (pointerId: number) => {
+    try {
+      headerRef.current?.releasePointerCapture?.(pointerId);
+    } catch {
+      // 指针捕获可能已由浏览器释放。
+    }
+  };
+
+  const finishClose = () => {
+    if (closeCommittedRef.current) return;
+    closeCommittedRef.current = true;
+    clearCloseTimer();
+    onClose();
+  };
+
+  const requestClose = (velocity = 0, height = drawerHeight()) => {
+    const activeDrag = dragRef.current;
+    dragRef.current = null;
+    if (activeDrag) releaseDragCapture(activeDrag.pointerId);
+    if (closeCommittedRef.current || phaseRef.current === 'closing') return;
+    clearCloseTimer();
+    stopAnimation();
+    if (shouldReduceDrawerMotion()) {
+      setDrawerOffset(height);
+      finishClose();
+      return;
+    }
+
+    const springVelocity = Math.max(-DRAWER_EXIT_VELOCITY_LIMIT, Math.min(velocity, DRAWER_EXIT_VELOCITY_LIMIT));
+    animateDrawer(height, springVelocity, 'closing', finishClose);
+    if (!closeCommittedRef.current) {
+      closeTimerRef.current = window.setTimeout(finishClose, 520);
+    }
+  };
+
+  const settleDrawer = (velocity: number, forceOpen = false) => {
+    if (!dialogRef.current) return;
+    const height = drawerHeight();
+    const currentOffset = offsetRef.current;
+    const projectedEndpoint = projectMomentum(currentOffset, velocity);
+    const target = forceOpen
+      ? 0
+      : selectProjectedSnap(projectedEndpoint, 0, [0, height]);
+
+    if (target === height) {
+      requestClose(velocity, height);
+      return;
+    }
+    if (shouldReduceDrawerMotion()) {
+      setDrawerOffset(target);
+      setPhase('idle');
+      return;
+    }
+
+    animateDrawer(target, velocity, 'settling', () => {
+      setDrawerOffset(0);
+      setPhase('idle');
+    });
+  };
+
+  const cancelActiveDrag = () => {
+    const drag = dragRef.current;
+    if (!drag) return;
+    dragRef.current = null;
+    releaseDragCapture(drag.pointerId);
+    settleDrawer(0, true);
+  };
+
+  const beginDrag = (event: React.PointerEvent<HTMLElement>) => {
+    if (!event.isPrimary || event.button !== 0 || dragRef.current || closeCommittedRef.current) return;
+    if ((event.target as HTMLElement).closest('button, a, input, select, textarea, [contenteditable="true"]')) return;
+    clearCloseTimer();
+    stopAnimation();
+    try {
+      event.currentTarget.setPointerCapture?.(event.pointerId);
+    } catch {
+      return;
+    }
+    setPhase('dragging');
+    dragRef.current = {
+      committed: false,
+      history: [{ position: offsetRef.current, time: event.timeStamp }],
+      pointerId: event.pointerId,
+      startOffset: offsetRef.current,
+      startY: event.clientY,
+    };
+  };
+
+  const moveDrag = (event: React.PointerEvent<HTMLElement>) => {
+    const drag = dragRef.current;
+    const dialog = dialogRef.current;
+    if (!drag || !dialog || event.pointerId !== drag.pointerId) return;
+    const delta = event.clientY - drag.startY;
+    if (!drag.committed) {
+      if (Math.abs(delta) < 10) return;
+      drag.committed = true;
+    }
+
+    event.preventDefault();
+    const height = drawerHeight();
+    const rawOffset = drag.startOffset + delta;
+    const nextOffset = rawOffset < 0
+      ? rubberBand(rawOffset, height)
+      : rawOffset > height
+        ? height + rubberBand(rawOffset - height, height)
+        : rawOffset;
+    setDrawerOffset(nextOffset);
+    drag.history.push({ position: nextOffset, time: event.timeStamp });
+    const cutoff = event.timeStamp - 120;
+    drag.history = drag.history.filter(({ time }) => time >= cutoff).slice(-6);
+  };
+
+  const endDrag = (event: React.PointerEvent<HTMLElement>, cancelled = false) => {
+    if (phaseRef.current === 'closing') return;
+    const drag = dragRef.current;
+    if (!drag || event.pointerId !== drag.pointerId) return;
+    dragRef.current = null;
+    releaseDragCapture(event.pointerId);
+
+    if (!drag.committed) {
+      settleDrawer(0, true);
+      return;
+    }
+    const latestTime = event.timeStamp;
+    drag.history.push({ position: offsetRef.current, time: latestTime });
+    const recent = drag.history.filter(({ time }) => time >= latestTime - 120);
+    const first = recent[0] ?? drag.history[0];
+    const last = recent[recent.length - 1] ?? drag.history[drag.history.length - 1];
+    const elapsed = Math.max(last.time - first.time, 16);
+    const velocity = ((last.position - first.position) / elapsed) * 1000;
+    settleDrawer(cancelled ? 0 : velocity, cancelled);
+  };
+
+  useLayoutEffect(() => {
+    const height = drawerHeight();
+    if (shouldReduceDrawerMotion()) {
+      setDrawerOffset(0);
+      setPhase('idle');
+      return;
+    }
+    setDrawerOffset(height);
+    animateDrawer(0, 0, 'opening', () => {
+      setDrawerOffset(0);
+      setPhase('idle');
+    });
+  }, []);
 
   useEffect(() => {
     const dialog = dialogRef.current;
@@ -368,7 +1079,7 @@ function CardDetailDrawer({ card, onClose }: { card: CardDetail; onClose: () => 
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
         event.preventDefault();
-        onClose();
+        requestClose();
         return;
       }
       if (event.key !== 'Tab') return;
@@ -392,21 +1103,74 @@ function CardDetailDrawer({ card, onClose }: { card: CardDetail; onClose: () => 
       }
     };
 
+    const handleWindowBlur = () => cancelActiveDrag();
     document.addEventListener('keydown', handleKeyDown);
-    return () => document.removeEventListener('keydown', handleKeyDown);
-  }, [onClose]);
+    window.addEventListener('blur', handleWindowBlur);
+    return () => {
+      document.removeEventListener('keydown', handleKeyDown);
+      window.removeEventListener('blur', handleWindowBlur);
+      const drag = dragRef.current;
+      if (drag) releaseDragCapture(drag.pointerId);
+      dragRef.current = null;
+      clearCloseTimer();
+      stopAnimation();
+    };
+  }, []);
 
-  return (
-    <div className="cards-drawer-layer" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
-      <aside aria-label="卡片详情" aria-modal="true" className="cards-drawer" ref={dialogRef} role="dialog" tabIndex={-1}>
-        <header>
-          <div>
-            <span className={`cards-status cards-status--${card.aiStatus}`}>{aiStatusLabels[card.aiStatus]}</span>
-            <h2>{card.normalizedStatement || '未生成规范知识'}</h2>
+  useEffect(() => {
+    const body = document.body;
+    const previousOverflow = body.style.overflow;
+    const previousPaddingRight = body.style.paddingRight;
+    const viewportWidth = document.documentElement.clientWidth;
+    const scrollbarWidth = viewportWidth > 0
+      ? Math.max(0, window.innerWidth - viewportWidth)
+      : 0;
+    const currentPaddingRight = Number.parseFloat(window.getComputedStyle(body).paddingRight) || 0;
+
+    body.style.overflow = 'hidden';
+    if (scrollbarWidth > 0) {
+      body.style.paddingRight = `${currentPaddingRight + scrollbarWidth}px`;
+    }
+    return () => {
+      body.style.overflow = previousOverflow;
+      body.style.paddingRight = previousPaddingRight;
+    };
+  }, []);
+
+  return createPortal(
+    <div className="cards-drawer-layer" data-motion-phase="opening" onMouseDown={(event) => { if (event.target === event.currentTarget) requestClose(); }}>
+      <aside aria-label="卡片详情" aria-modal="true" className="cards-drawer liquid-glass liquid-glass--thick" data-motion-phase="opening" ref={dialogRef} role="dialog" tabIndex={-1}>
+        <header
+          className="cards-drawer__header"
+          onLostPointerCapture={(event) => endDrag(event, true)}
+          onPointerCancel={(event) => endDrag(event, true)}
+          onPointerDown={beginDrag}
+          onPointerMove={moveDrag}
+          onPointerUp={endDrag}
+          ref={headerRef}
+        >
+          <div
+            aria-hidden="true"
+            className="cards-drawer__drag-handle"
+          >
+            <span />
           </div>
-          <button aria-label="关闭详情" className="cards-icon-button" onClick={onClose} title="关闭详情" type="button"><X aria-hidden="true" size={18} /></button>
+          <div className="cards-drawer__heading">
+            <span className={`cards-status cards-status--${card.aiStatus}`}>{aiStatusLabels[card.aiStatus]}</span>
+            <h2><MathText text={card.normalizedStatement || '未生成规范知识'} /></h2>
+          </div>
+          <button aria-label="关闭详情" className="cards-icon-button liquid-pressable" onClick={() => requestClose()} title="关闭详情" type="button"><X aria-hidden="true" size={18} /></button>
         </header>
-        <DetailField label="原始输入" value={card.rawInput} />
+        {group.cards.length > 1 ? (
+          <section className="cards-drawer__group" aria-label="衍生问题">
+            <strong>同一初始稿衍生 {group.cards.length} 个问题</strong>
+            <ul>
+              {group.cards.map(({ id, normalizedStatement }) => <li key={id}>{normalizedStatement || '待生成知识点'}</li>)}
+            </ul>
+          </section>
+        ) : null}
+        <QuizItemsPreview cards={group.cards} />
+        <DetailField label="原始输入" renderMath={false} value={card.rawInput} />
         <DetailField label="错误选项或易错点" value={card.wrongPoint} />
         <DetailField label="正确解析" value={card.analysis} />
         <DetailField label="记忆速记口诀" value={card.mnemonic} />
@@ -420,15 +1184,50 @@ function CardDetailDrawer({ card, onClose }: { card: CardDetail; onClose: () => 
           <div><dt>不会标注次数</dt><dd>{card.wrongCount} 次</dd></div>
         </dl>
       </aside>
-    </div>
+    </div>,
+    document.body,
   );
 }
 
-function DetailField({ label, value }: { label: string; value: string }) {
+function QuizItemsPreview({ cards }: { cards: CardDetail[] }) {
+  const items = cards.flatMap(({ id: cardId, quizItems }) => quizItems.map((item) => ({ ...item, cardId })));
+  if (items.length === 0) return null;
+
+  return (
+    <section aria-label="AI 优化题目与答案" className="cards-drawer__quiz">
+      <h3>AI 优化题目与答案</h3>
+      <ol>
+        {items.map(({ answer, cardId, id, question }, index) => (
+          <li key={`${cardId}:${id}`}>
+            <div>
+              <span>问题 {index + 1}</span>
+              <p><MathText text={question} /></p>
+            </div>
+            <div className="cards-drawer__quiz-answer">
+              <span>答案</span>
+              <p><MathText text={answer} /></p>
+            </div>
+          </li>
+        ))}
+      </ol>
+    </section>
+  );
+}
+
+function shouldReduceDrawerMotion() {
+  return document.documentElement.dataset.motion === 'reduced'
+    || window.matchMedia?.('(prefers-reduced-motion: reduce)').matches === true;
+}
+
+function DetailField({ label, renderMath = true, value }: {
+  label: string;
+  renderMath?: boolean;
+  value: string;
+}) {
   return (
     <section className="cards-drawer__field">
       <h3>{label}</h3>
-      <p>{value || '未填写'}</p>
+      <p>{renderMath ? <MathText text={value || '未填写'} /> : value || '未填写'}</p>
     </section>
   );
 }
@@ -482,6 +1281,7 @@ function FilterSelect({ children, label, onChange, value }: { children: React.Re
 
 function readFilters(searchParams: URLSearchParams): FilterState {
   return {
+    contentVersion: searchParams.get('contentVersion') === 'original' ? 'original' : 'optimized',
     query: searchParams.get('query') ?? '',
     categoryIds: searchParams.getAll('categoryIds').filter(Boolean),
     tagIds: searchParams.getAll('tagIds').filter(Boolean),
@@ -501,6 +1301,7 @@ function updateSearchParams(
 ) {
   const next = { ...current, ...patch };
   const params = new URLSearchParams();
+  params.set('contentVersion', next.contentVersion);
   if (next.query) params.set('query', next.query);
   next.categoryIds.forEach((id) => params.append('categoryIds', id));
   next.tagIds.forEach((id) => params.append('tagIds', id));
@@ -515,6 +1316,7 @@ function updateSearchParams(
 
 function buildSearchPath(filters: FilterState) {
   const params = new URLSearchParams();
+  params.set('contentVersion', filters.contentVersion);
   params.set('query', filters.query);
   filters.categoryIds.forEach((id) => params.append('categoryIds', id));
   filters.tagIds.forEach((id) => params.append('tagIds', id));
@@ -531,10 +1333,46 @@ function splitNames(value: string) {
   return [...new Set(value.split(/[，,\n]/).map((item) => item.trim()).filter(Boolean))];
 }
 
-function toggleSet(current: Set<string>, value: string, selected: boolean) {
+function cardToGroup(card: CardDetail): CardGroup {
+  return { card, cards: [card] };
+}
+
+function groupCards(cards: CardDetail[]): CardGroup[] {
+  const groups = new Map<string, CardGroup>();
+  for (const card of cards) {
+    const key = sourceGroupKey(card);
+    const existing = groups.get(key);
+    if (existing) {
+      existing.cards.push(card);
+    } else {
+      groups.set(key, { card, cards: [card] });
+    }
+  }
+  return [...groups.values()];
+}
+
+function sourceGroupKey(card: CardDetail) {
+  const rawInput = card.rawInput.trim();
+  if (card.rawContentJson?.trim()) {
+    try {
+      const parsed: unknown = JSON.parse(card.rawContentJson);
+      if (typeof parsed === 'object' && parsed !== null) {
+        return 'json:' + JSON.stringify(parsed);
+      }
+    } catch {
+      // 无法解析富文本时回退到原始纯文本。
+    }
+  }
+  if (rawInput) return 'text:' + rawInput;
+  return 'card:' + card.id;
+}
+
+function toggleSet(current: Set<string>, values: string[], selected: boolean) {
   const next = new Set(current);
-  if (selected) next.add(value);
-  else next.delete(value);
+  for (const value of values) {
+    if (selected) next.add(value);
+    else next.delete(value);
+  }
   return next;
 }
 
@@ -546,6 +1384,22 @@ function nextDueText(card: CardDetail) {
   if (card.quizItems.length === 0) return '无题面';
   const dueAt = card.quizItems.reduce((earliest, item) => item.dueAt < earliest ? item.dueAt : earliest, card.quizItems[0].dueAt);
   return new Date(dueAt).toLocaleDateString('zh-CN');
+}
+
+function downloadBlob(blob: Blob, fileName: string) {
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = fileName;
+  document.body.append(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+}
+
+function timestampForFileName(value: Date) {
+  const iso = value.toISOString();
+  return `${iso.slice(0, 10).replaceAll('-', '')}-${iso.slice(11, 19).replaceAll(':', '')}`;
 }
 
 function positiveInteger(value: string | null, fallback: number) {

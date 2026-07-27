@@ -71,13 +71,15 @@ export class DeepSeekAiProvider implements AiProvider {
           body: JSON.stringify({
             model: 'deepseek-v4-flash',
             thinking: { type: 'disabled' },
+            temperature: 0.1,
+            max_tokens: 8192,
             response_format: { type: 'json_object' },
             messages: [
               { role: 'system', content: DEEPSEEK_SYSTEM_PROMPT },
               { role: 'user', content: JSON.stringify(input) },
             ],
           }),
-          signal: AbortSignal.timeout(20_000),
+          signal: AbortSignal.timeout(60_000),
         },
       );
     } catch (error) {
@@ -110,7 +112,7 @@ export class DeepSeekAiProvider implements AiProvider {
 
     let parsed: unknown;
     try {
-      parsed = JSON.parse(content);
+      parsed = JSON.parse(extractJsonObject(content));
     } catch {
       throw new DeepSeekError('invalid_json');
     }
@@ -121,6 +123,51 @@ export class DeepSeekAiProvider implements AiProvider {
     }
     return normalized.data;
   }
+}
+
+function extractJsonObject(content: string): string {
+  const trimmed = content.trim();
+  const fenced = /^```(?:json)?\s*([\s\S]*?)\s*```$/i.exec(trimmed);
+  if (fenced?.[1]) return fenced[1].trim();
+
+  const firstStart = trimmed.indexOf('{');
+  if (firstStart === -1) return trimmed;
+  const first = findJsonObjectEnd(trimmed, firstStart);
+  if (first === null) return trimmed;
+  if (firstStart === 0 && first.end === trimmed.length - 1) return trimmed;
+  const nextStart = trimmed.indexOf('{', first.end + 1);
+  if (nextStart !== -1 && findJsonObjectEnd(trimmed, nextStart) !== null) return trimmed;
+  return first.value;
+}
+
+function findJsonObjectEnd(content: string, start: number): { end: number; value: string } | null {
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+  for (let index = start; index < content.length; index += 1) {
+    const char = content[index];
+    if (escaped) {
+      escaped = false;
+      continue;
+    }
+    if (char === '\\' && inString) {
+      escaped = true;
+      continue;
+    }
+    if (char === '"') {
+      inString = !inString;
+      continue;
+    }
+    if (inString) continue;
+    if (char === '{') depth += 1;
+    if (char === '}') {
+      depth -= 1;
+      if (depth === 0) {
+        return { end: index, value: content.slice(start, index + 1) };
+      }
+    }
+  }
+  return null;
 }
 
 export function createDeepSeekProvider(

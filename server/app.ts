@@ -12,6 +12,10 @@ import type { AnalyticsService } from './analytics/service';
 import { createSettingsRouter, type SettingsRouterDependencies } from './settings/routes';
 import { createBackupRouter } from './backups/routes';
 import type { BackupService } from './backups/service';
+import { createLocalAppsRouter, type LocalAppsRouterDependencies } from './localApps/routes';
+import { createCurrentAffairsRouter } from './currentAffairs/routes';
+import type { CurrentAffairsService } from './currentAffairs/service';
+import { createReviewImageRouter, type ReviewImageService } from './reviewImages';
 
 interface AppDependencies {
   cardService?: CardService;
@@ -20,6 +24,9 @@ interface AppDependencies {
   settings?: SettingsRouterDependencies;
   uploadsDirectory?: string;
   backupService?: BackupService;
+  localApps?: LocalAppsRouterDependencies;
+  currentAffairsService?: CurrentAffairsService;
+  reviewImageService?: ReviewImageService;
 }
 
 export function createApp({
@@ -29,6 +36,9 @@ export function createApp({
   settings,
   uploadsDirectory,
   backupService,
+  localApps,
+  currentAffairsService,
+  reviewImageService,
 }: AppDependencies = {}) {
   const app = express();
 
@@ -59,6 +69,18 @@ export function createApp({
 
   if (backupService) {
     app.use(createBackupRouter(backupService));
+  }
+
+  if (localApps) {
+    app.use(createLocalAppsRouter(localApps));
+  }
+
+  if (currentAffairsService) {
+    app.use(createCurrentAffairsRouter(currentAffairsService));
+  }
+
+  if (reviewImageService) {
+    app.use(createReviewImageRouter(reviewImageService));
   }
 
   const clientDir = resolve(process.cwd(), 'dist/client');

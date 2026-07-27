@@ -4,11 +4,13 @@ import TextStyle from '@tiptap/extension-text-style';
 import { EditorContent, useEditor, type JSONContent } from '@tiptap/react';
 import StarterKit from '@tiptap/starter-kit';
 import { Bold as BoldIcon, Sigma } from 'lucide-react';
+import type { EditingTarget } from './editingTarget';
 
 interface RichTextEditorProps {
   value: string;
   hint: string;
   onChange: (value: { text: string; json: string }) => void;
+  onTarget: (target: EditingTarget) => void;
 }
 
 const emptyDocument: JSONContent = {
@@ -26,7 +28,6 @@ const editorExtensions = [
     gapcursor: false,
     hardBreak: false,
     heading: false,
-    history: false,
     horizontalRule: false,
     italic: false,
     listItem: false,
@@ -44,7 +45,7 @@ const editorColors = [
 ] as const;
 const allowedColors = new Set(editorColors.map(({ value }) => value));
 
-export function RichTextEditor({ value, hint, onChange }: RichTextEditorProps) {
+export function RichTextEditor({ value, hint, onChange, onTarget }: RichTextEditorProps) {
   const controlledContent = useMemo(() => parseControlledDocument(value), [value]);
   const editor = useEditor({
     extensions: editorExtensions,
@@ -70,6 +71,34 @@ export function RichTextEditor({ value, hint, onChange }: RichTextEditorProps) {
       });
     },
   });
+  const editingTarget = useMemo<EditingTarget | null>(() => {
+    if (!editor) return null;
+    return {
+      label: '原始内容',
+      async copy() {
+        const { from, to, empty } = editor.state.selection;
+        const text = empty ? editor.getText() : editor.state.doc.textBetween(from, to, '\n');
+        await navigator.clipboard.writeText(text);
+      },
+      async paste() {
+        const text = await navigator.clipboard.readText();
+        editor.chain().focus().insertContent(text).run();
+      },
+      selectAll() {
+        editor.chain().focus().selectAll().run();
+      },
+      undo() {
+        editor.chain().focus().undo().run();
+      },
+      clear() {
+        editor.chain().focus().clearContent().run();
+      },
+    };
+  }, [editor]);
+
+  useEffect(() => {
+    if (editingTarget) onTarget(editingTarget);
+  }, [editingTarget, onTarget]);
 
   useEffect(() => {
     if (!editor) return;
@@ -92,11 +121,16 @@ export function RichTextEditor({ value, hint, onChange }: RichTextEditorProps) {
   }, [controlledContent, editor, hint]);
 
   return (
-    <div className="rich-text-editor">
+    <div
+      className="rich-text-editor"
+      onFocusCapture={() => {
+        if (editingTarget) onTarget(editingTarget);
+      }}
+    >
       <div className="rich-text-editor__toolbar" role="toolbar" aria-label="原始内容格式">
         <button
           aria-label="加粗"
-          className={editor?.isActive('bold') ? 'is-active' : undefined}
+          className={`liquid-pressable${editor?.isActive('bold') ? ' is-active' : ''}`}
           disabled={!editor}
           onClick={() => editor?.chain().focus().toggleBold().run()}
           title="加粗"
@@ -107,7 +141,7 @@ export function RichTextEditor({ value, hint, onChange }: RichTextEditorProps) {
         {editorColors.map((color) => (
           <button
             aria-label={`文字颜色 ${color.name}`}
-            className="rich-text-editor__swatch"
+            className="rich-text-editor__swatch liquid-pressable"
             disabled={!editor}
             key={color.value}
             onClick={() => editor?.chain().focus().setColor(color.value).run()}
@@ -120,6 +154,7 @@ export function RichTextEditor({ value, hint, onChange }: RichTextEditorProps) {
         ))}
         <button
           aria-label="插入公式文本"
+          className="liquid-pressable"
           disabled={!editor}
           onClick={() => editor?.chain().focus().insertContent({ type: 'text', text: formulaText }).run()}
           title="插入公式文本"

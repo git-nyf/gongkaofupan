@@ -10,6 +10,9 @@ import { createDatabaseManager } from './db/database';
 import { migrate } from './db/migrations';
 import { createStudyService } from './study/service';
 import { createBackupService } from './backups/service';
+import { createQqMusicService } from './localApps/qqMusic';
+import { createCurrentAffairsService } from './currentAffairs/service';
+import { createReviewImageService } from './reviewImages';
 
 const config = readConfig();
 mkdirSync(config.dataDir, { recursive: true });
@@ -33,6 +36,11 @@ const backupService = createBackupService({
   dataDirectory: config.dataDir,
   uploadsDirectory,
 });
+const qqMusicService = createQqMusicService();
+const currentAffairsService = createCurrentAffairsService();
+const reviewImageService = createReviewImageService({
+  directory: resolve(config.dataDir, 'review-images'),
+});
 const app = createApp({
   cardService,
   studyService,
@@ -40,9 +48,13 @@ const app = createApp({
   settings: {
     database: databaseManager,
     deepseekApiKey: config.deepseek.apiKey,
+    isQqMusicAvailable: qqMusicService.isAvailable,
   },
   uploadsDirectory,
   backupService,
+  localApps: { database: databaseManager, qqMusicService },
+  currentAffairsService,
+  reviewImageService,
 });
 
 app.listen(config.port, '127.0.0.1', () => {

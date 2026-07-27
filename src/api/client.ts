@@ -49,3 +49,12 @@ export async function apiForm<T>(path: string, formData: FormData): Promise<T> {
 
   return readSuccessResponse<T>(response);
 }
+
+export async function apiBlob(path: string, init?: RequestInit): Promise<Blob> {
+  const response = await fetch(path, init);
+  if (!response.ok) {
+    throw await toApiError(response);
+  }
+
+  return response.blob();
+}

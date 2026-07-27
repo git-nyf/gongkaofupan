@@ -554,7 +554,13 @@ describe('SQLite 与图片备份恢复', () => {
     ).toContain('template');
     expect(
       database.db.prepare('SELECT version FROM schema_migrations ORDER BY version').all(),
-    ).toEqual([{ version: 1 }, { version: 2 }]);
+    ).toEqual([
+      { version: 1 },
+      { version: 2 },
+      { version: 3 },
+      { version: 4 },
+      { version: 5 },
+    ]);
   });
 
   it('备份不含 uploads 条目时恢复为空图片集', async () => {

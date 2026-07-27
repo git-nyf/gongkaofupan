@@ -2,6 +2,7 @@ export type EntryMode = 'mistake' | 'knowledge';
 export type AiStatus = 'processing' | 'ready' | 'pending' | 'needs_input';
 export type Mastery = 'unseen' | 'again' | 'hard' | 'good';
 export type QuizDirection = 'single' | 'forward' | 'reverse';
+export type FocusMinutes = 5 | 15 | 25 | 45;
 
 export interface NormalizeCardInput {
   entry_mode: EntryMode;
@@ -57,8 +58,6 @@ export interface CreateCardInput {
   template: string;
   sourceType: string;
   sourceDetail: string;
-  rating: 1 | 2 | 3 | 4 | 5;
-  initialMastery: Mastery;
   attachments: AttachmentInput[];
 }
 
@@ -77,8 +76,6 @@ export interface CardDetail {
   aiStatus: AiStatus;
   sourceType: string;
   sourceDetail: string;
-  rating: number;
-  mastery: Mastery;
   wrongCount: number;
   archived: boolean;
   createdAt: string;
@@ -101,12 +98,25 @@ export interface CardDetail {
   }>;
 }
 
+export interface CardFolderSummary {
+  id: string;
+  name: string;
+  originalCount: number;
+  cardIds: string[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CardFolderContents {
+  folder: CardFolderSummary;
+  cards: CardDetail[];
+}
+
 export interface CardSearchInput {
+  contentVersion: 'optimized' | 'original';
   query: string;
   categoryIds: string[];
   tagIds: string[];
-  rating?: 1 | 2 | 3 | 4 | 5;
-  mastery?: Mastery;
   aiStatus?: AiStatus;
   archived: boolean;
   createdFrom?: string;
@@ -136,15 +146,38 @@ export interface CardUpdateInput {
   template?: string;
   sourceType?: string;
   sourceDetail?: string;
-  rating?: 1 | 2 | 3 | 4 | 5;
-  mastery?: Mastery;
   archived?: boolean;
+  quizItems?: Array<{
+    id: string;
+    question: string;
+    answer: string;
+  }>;
+}
+
+export interface OriginalCardRewriteInput {
+  rawInput: string;
+  rawContentJson: string | null;
+  wrongPoint: string;
+  analysis: string;
+  mnemonic: string;
+  extension: string;
+  notes: string;
+  categoryIds: string[];
+  userTags: string[];
+  template: string;
+  sourceType: string;
+  sourceDetail: string;
+}
+
+export interface OriginalCardRewriteResult {
+  card: CardDetail;
+  derivedCount: number;
 }
 
 export interface BulkCardUpdateInput {
-  rating?: 1 | 2 | 3 | 4 | 5;
   tags?: string[];
   archived?: boolean;
+  position?: 'top' | 'bottom';
 }
 
 export interface QuizItemSchedulingState {
@@ -165,13 +198,13 @@ export interface StudyItem {
   cardId: string;
   question: string;
   answer: string;
+  rawInput: string;
   normalizedStatement: string;
   analysis: string;
   mnemonic: string;
   extension: string;
   notes: string;
-  rating: number;
-  mastery: Mastery;
+  wrongCount: number;
   archived: boolean;
   categories: Array<{ id: string; name: string; parentId: string | null }>;
   tags: Array<{ id: string; name: string; origin: 'user' | 'ai' }>;
@@ -181,8 +214,6 @@ export interface StudySessionInput {
   categoryIds: string[];
   cardIds: string[];
   tagIds: string[];
-  rating?: 1 | 2 | 3 | 4 | 5;
-  mastery?: Mastery;
   createdFrom?: string;
   createdTo?: string;
   count: number;
@@ -192,19 +223,40 @@ export interface StudySessionInput {
 
 export interface StudySessionResult {
   items: StudyItem[];
+  totalAvailable: number;
 }
 
 export interface ReviewInput {
   quizItemId: string;
-  rating: 'again' | 'hard' | 'good';
+  result: 'unknown' | 'known';
 }
 
 export interface ReviewResult {
   quizItemId: string;
   cardId: string;
-  rating: 'again' | 'hard' | 'good';
+  result: 'unknown' | 'known';
   nextDueAt: string;
-  quizMastery: Mastery;
-  cardMastery: Mastery;
   wrongCount: number;
+}
+
+export interface DashboardSummary {
+  dueToday: number;
+  addedToday: number;
+  conquestPending: number;
+  weakness: Array<{
+    categoryId: string;
+    categoryName: string;
+    score: number;
+    cardCount: number;
+  }>;
+}
+
+export interface AppSettings {
+  defaultSessionSize: number;
+  defaultOrder: 'fixed' | 'random';
+  dueFirst: boolean;
+  defaultFocusMinutes: FocusMinutes;
+  qqMusicPath: string;
+  qqMusicAvailable: boolean;
+  deepseekConfigured: boolean;
 }

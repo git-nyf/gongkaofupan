@@ -31,16 +31,15 @@ function schedulingState(
 describe('FSRS 调度映射', () => {
   it.each([
     ['again', Rating.Again],
-    ['hard', Rating.Hard],
     ['good', Rating.Good],
   ] as const)('把 %s 映射到对应 FSRS 等级', (rating, expected) => {
     expect(toFsrsRating(rating)).toBe(expected);
   });
 
   it('只暴露三级业务等级，不产生 Easy 或 Manual 路径', () => {
-    const ratings = (['again', 'hard', 'good'] as const).map(toFsrsRating);
+    const ratings = (['again', 'good'] as const).map(toFsrsRating);
 
-    expect(ratings).toEqual([Rating.Again, Rating.Hard, Rating.Good]);
+    expect(ratings).toEqual([Rating.Again, Rating.Good]);
     expect(ratings).not.toContain(Rating.Easy);
     expect(ratings).not.toContain(Rating.Manual);
   });
@@ -74,7 +73,7 @@ describe('FSRS 调度映射', () => {
     expect(toFsrsCard(schedulingState({ lastReviewAt: null }))).not.toHaveProperty('last_review');
   });
 
-  it.each(['again', 'hard', 'good'] as const)(
+  it.each(['again', 'good'] as const)(
     '新题面使用空卡计算 %s 并返回完整 card 与 log',
     (rating) => {
       const input = schedulingState({ reps: 0, dueAt: '2030-01-01T00:00:00.000Z' });
@@ -96,7 +95,7 @@ describe('FSRS 调度映射', () => {
     },
   );
 
-  it.each(['again', 'hard', 'good'] as const)(
+  it.each(['again', 'good'] as const)(
     '已有题面保留历史状态后计算 %s',
     (rating) => {
       const input = schedulingState();

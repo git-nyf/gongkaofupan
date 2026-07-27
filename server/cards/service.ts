@@ -4,36 +4,54 @@ import type {
   AttachmentInput,
   BulkCardUpdateInput,
   CardDetail,
+  CardFolderContents,
+  CardFolderSummary,
   CardSearchInput,
   CardSearchResult,
   CardUpdateInput,
   CreateCardInput,
   NormalizeCardInput,
   NormalizedCard,
+  OriginalCardRewriteInput,
+  OriginalCardRewriteResult,
 } from '../../shared/contracts';
 import type { AiProvider } from '../ai/provider';
 import {
   CardRepository,
   CardRepositoryError,
   type DatabaseProvider,
+  type RandomOriginalFilter,
   type RetryWork,
 } from './repository';
+import { createExcelWorkbook } from './exportExcel';
 
 export interface CardService {
   create(input: CreateCardInput): Promise<CardDetail>;
   search(input: CardSearchInput): CardSearchResult;
+  listFolders(): CardFolderSummary[];
+  createFolder(name: string): CardFolderSummary;
+  deleteFolder(folderId: string): void;
+  getFolderContents(folderId: string): CardFolderContents;
+  addCardsToFolder(folderId: string, cardIds: string[]): CardFolderSummary;
+  removeCardsFromFolder(folderId: string, cardIds: string[]): CardFolderSummary;
+  randomOriginal(input: RandomOriginalFilter): CardDetail | null;
+  countRandomOriginals(input: RandomOriginalFilter): number;
   get(cardId: string): CardDetail;
   update(cardId: string, input: CardUpdateInput): Promise<CardDetail>;
+  rewriteOriginal(cardId: string, input: OriginalCardRewriteInput): Promise<OriginalCardRewriteResult>;
   bulkUpdate(ids: string[], input: BulkCardUpdateInput): number;
   delete(cardId: string): Promise<void>;
   addAttachments(cardId: string, attachments: AttachmentInput[]): CardDetail;
   deleteAttachment(cardId: string, attachmentId: string): Promise<void>;
+  exportAllAsExcel(): Promise<Buffer>;
   retryAi(cardId: string): Promise<CardDetail>;
   recoverStaleProcessing(now: Date): number;
   retryPendingBatch(limit: number): Promise<{ attempted: number; ready: number; stillPending: number }>;
 }
 
 export type CardServiceErrorCode =
+  | 'folder_name_conflict'
+  | 'folder_resource_not_found'
   | 'invalid_categories'
   | 'invalid_state'
   | 'not_found'
@@ -134,7 +152,7 @@ export function createCardService({
 
       return normalizeAndComplete(cardId, {
         normalizeInput: toNormalizeInput(prepared),
-        mastery: prepared.initialMastery,
+        mastery: 'unseen',
       });
     },
 
@@ -146,6 +164,79 @@ export function createCardService({
         page: input.page,
         pageSize: input.pageSize,
       };
+    },
+
+    listFolders() {
+      try {
+        return repository.listFolders();
+      } catch (error) {
+        throw mapRepositoryError(error);
+      }
+    },
+
+    createFolder(name) {
+      try {
+        const folderId = repository.createFolderInTransaction(name.trim(), now().toISOString());
+        return repository.getFolderSummary(folderId);
+      } catch (error) {
+        throw mapRepositoryError(error);
+      }
+    },
+
+    deleteFolder(folderId) {
+      try {
+        repository.deleteFolderInTransaction(folderId);
+      } catch (error) {
+        throw mapRepositoryError(error);
+      }
+    },
+
+    getFolderContents(folderId) {
+      try {
+        const folder = repository.getFolderSummary(folderId);
+        const cardIds = repository.getFolderCardIds(folderId);
+        return {
+          folder,
+          cards: repository.getFolderDetails(cardIds),
+        };
+      } catch (error) {
+        throw mapRepositoryError(error);
+      }
+    },
+
+    addCardsToFolder(folderId, cardIds) {
+      try {
+        repository.addCardsToFolderInTransaction(
+          folderId,
+          [...new Set(cardIds)],
+          now().toISOString(),
+        );
+        return repository.getFolderSummary(folderId);
+      } catch (error) {
+        throw mapRepositoryError(error);
+      }
+    },
+
+    removeCardsFromFolder(folderId, cardIds) {
+      try {
+        repository.removeCardsFromFolderInTransaction(
+          folderId,
+          [...new Set(cardIds)],
+          now().toISOString(),
+        );
+        return repository.getFolderSummary(folderId);
+      } catch (error) {
+        throw mapRepositoryError(error);
+      }
+    },
+
+    randomOriginal(input) {
+      const cardId = repository.randomOriginalId(input);
+      return cardId === null ? null : repository.getDetail(cardId);
+    },
+
+    countRandomOriginals(input) {
+      return repository.countRandomOriginalSources(input);
     },
 
     get(cardId) {
@@ -165,6 +256,22 @@ export function createCardService({
       } catch (error) {
         throw mapRepositoryError(error);
       }
+    },
+
+    async rewriteOriginal(cardId, rewriteInput) {
+      const prepared = prepareOriginalRewriteInput(rewriteInput);
+      let work: RetryWork;
+      try {
+        work = repository.beginOriginalRewriteInTransaction(cardId, prepared, now().toISOString());
+      } catch (error) {
+        throw mapRepositoryError(error);
+      }
+
+      const card = await normalizeAndComplete(cardId, work);
+      return {
+        card,
+        derivedCount: repository.countOriginalGroup(cardId),
+      };
     },
 
     bulkUpdate(ids, updateInput) {
@@ -213,6 +320,10 @@ export function createCardService({
       await removeStoredFiles([storedName]);
     },
 
+    exportAllAsExcel() {
+      return createExcelWorkbook(repository.exportAllData());
+    },
+
     retryAi,
 
     recoverStaleProcessing(recoveryNow) {
@@ -255,6 +366,20 @@ function prepareUpdateInput(input: CardUpdateInput): CardUpdateInput {
     rawInput: input.rawInput?.trim(),
     categoryIds: input.categoryIds === undefined ? undefined : [...new Set(input.categoryIds)],
     userTags: input.userTags === undefined ? undefined : normalizeNames(input.userTags),
+    quizItems: input.quizItems?.map((item) => ({
+      id: item.id.trim(),
+      question: item.question.trim(),
+      answer: item.answer.trim(),
+    })),
+  };
+}
+
+function prepareOriginalRewriteInput(input: OriginalCardRewriteInput): OriginalCardRewriteInput {
+  return {
+    ...input,
+    rawInput: input.rawInput.trim(),
+    categoryIds: [...new Set(input.categoryIds)],
+    userTags: normalizeNames(input.userTags),
   };
 }
 

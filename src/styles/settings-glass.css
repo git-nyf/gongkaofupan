@@ -1,0 +1,252 @@
+.settings-page {
+  color: var(--color-text);
+}
+
+.settings-page .settings-section {
+  overflow: hidden;
+  border-color: rgba(198, 66, 50, 0.2);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.72);
+}
+
+.settings-page .settings-section + .settings-section {
+  margin-top: 18px;
+}
+
+.settings-page .settings-section h2,
+.settings-page .settings-section__heading > svg,
+.settings-page .experience-settings__music-heading > svg {
+  color: var(--color-accent);
+}
+
+.settings-page .settings-section__heading p,
+.settings-page .settings-page__header p {
+  color: var(--color-muted);
+}
+
+.settings-page .theme-picker {
+  border-top-color: rgba(119, 125, 133, 0.2);
+}
+
+.settings-page .theme-picker__option,
+.settings-page .theme-picker__custom,
+.settings-page .experience-settings__focus label span,
+.settings-page .experience-settings__motion label span,
+.settings-page .experience-settings__music input,
+.settings-page .theme-settings__fade input {
+  border: 1px solid rgba(119, 125, 133, 0.22);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.38);
+  box-shadow:
+    inset 0 1px rgba(255, 255, 255, 0.72),
+    0 4px 12px rgba(35, 38, 43, 0.05);
+  color: var(--color-text);
+}
+
+.settings-page .theme-picker__option,
+.settings-page .theme-picker__custom,
+.settings-page .experience-settings__focus label span,
+.settings-page .experience-settings__motion label span {
+  touch-action: manipulation;
+}
+
+.settings-page .theme-picker__option:hover {
+  border-color: rgba(198, 66, 50, 0.54);
+  box-shadow:
+    inset 0 1px rgba(255, 255, 255, 0.82),
+    0 8px 18px rgba(35, 38, 43, 0.09);
+  transform: translateY(-1px);
+}
+
+.settings-page .theme-picker__custom {
+  display: inline-flex;
+  width: min(230px, 100%);
+  min-height: 112px;
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  gap: 5px;
+  margin: 0 10px 10px 0;
+  padding: 10px;
+  border-style: dashed;
+  color: var(--color-muted);
+  text-align: center;
+  vertical-align: top;
+}
+
+.settings-page .theme-picker__custom > svg,
+.settings-page .theme-picker__custom > strong {
+  color: var(--color-accent);
+}
+
+.settings-page .theme-picker__custom > span {
+  font-size: 12px;
+}
+
+.settings-page .theme-picker__custom[data-dragging='true'] {
+  border-color: var(--color-accent);
+  background: rgba(249, 236, 234, 0.86);
+  box-shadow: inset 0 0 0 1px rgba(198, 66, 50, 0.28);
+}
+
+.settings-page .theme-picker__custom:focus-visible {
+  border-color: var(--color-accent);
+  box-shadow: 0 0 0 3px var(--color-focus);
+  outline: none;
+}
+
+.settings-page .theme-picker__upload-button {
+  min-height: 36px;
+  margin-top: 3px;
+  padding: 6px 10px;
+}
+
+.settings-page .theme-picker__option:has(input:checked),
+.settings-page .experience-settings__focus input:checked + span,
+.settings-page .experience-settings__motion input:checked + span {
+  border-color: var(--color-accent);
+  background: rgba(249, 236, 234, 0.86);
+  box-shadow:
+    inset 0 0 0 1px rgba(198, 66, 50, 0.34),
+    inset 0 1px rgba(255, 255, 255, 0.82);
+  color: var(--color-accent);
+}
+
+.settings-page .experience-settings__focus input:focus-visible + span,
+.settings-page .experience-settings__motion input:focus-visible + span {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+.settings-page .experience-settings__focus label span,
+.settings-page .experience-settings__motion label span,
+.settings-page .experience-settings__music input {
+  min-height: 44px;
+}
+
+.settings-page .theme-settings__fade input {
+  min-height: 44px;
+  padding: 0 12px;
+  accent-color: var(--color-accent);
+}
+
+.settings-page .experience-settings__music {
+  margin-top: 22px;
+  padding: 18px;
+  border-color: rgba(198, 66, 50, 0.18);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.38);
+}
+
+.settings-page .experience-settings__music-heading {
+  padding-bottom: 2px;
+}
+
+.settings-page .experience-settings__music input:focus-visible,
+.settings-page .theme-settings__fade input:focus-visible {
+  border-color: var(--color-accent);
+  box-shadow: 0 0 0 3px var(--color-focus);
+  outline: none;
+}
+
+.settings-page .button,
+.settings-page .theme-picker__option {
+  min-height: 44px;
+}
+
+.settings-page .button {
+  touch-action: manipulation;
+}
+
+.settings-page .settings-page__message,
+.settings-page .experience-settings__music-message {
+  border-left: 3px solid currentColor;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.52);
+  padding: 8px 10px;
+}
+
+html[data-motion='reduced'] .settings-page .theme-picker__option:hover,
+html[data-motion='reduced'] .settings-page .theme-picker__option:hover .theme-picker__preview {
+  transform: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .settings-page .theme-picker__option:hover,
+  .settings-page .theme-picker__option:hover .theme-picker__preview {
+    transform: none;
+  }
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  .settings-page .liquid-glass__nested {
+    background: #ffffff;
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+
+  .settings-page .settings-section,
+  .settings-page .theme-picker__custom,
+  .settings-page .experience-settings__music,
+  .settings-page .settings-page__message,
+  .settings-page .experience-settings__music-message {
+    background: #ffffff;
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+}
+
+@media (prefers-contrast: more) {
+  .settings-page .settings-section,
+  .settings-page .theme-picker__option,
+  .settings-page .theme-picker__custom,
+  .settings-page .experience-settings__focus label span,
+  .settings-page .experience-settings__motion label span,
+  .settings-page .experience-settings__music,
+  .settings-page .experience-settings__music input,
+  .settings-page .theme-settings__fade input {
+    border-color: var(--color-text);
+    background: #ffffff;
+  }
+
+  .settings-page .theme-picker__option:has(input:checked),
+  .settings-page .experience-settings__focus input:checked + span,
+  .settings-page .experience-settings__motion input:checked + span {
+    outline: 2px solid var(--color-accent);
+    outline-offset: 1px;
+  }
+}
+
+@media (max-width: 700px) {
+  .settings-page__header {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .settings-page__actions,
+  .settings-page__actions .button {
+    width: 100%;
+  }
+
+  .settings-page__actions .button {
+    flex: 1 1 0;
+  }
+
+  .settings-page .experience-settings__focus > div,
+  .settings-page .experience-settings__motion > div {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .settings-page .experience-settings__music {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .settings-page .experience-settings__music .button {
+    width: 100%;
+  }
+
+  .settings-page .theme-picker__custom {
+    width: 100%;
+    margin-right: 0;
+  }
+}

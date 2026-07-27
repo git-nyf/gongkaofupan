@@ -42,29 +42,28 @@ describe('AI 结构校验', () => {
     expect(value.question_type).toBe('unstructured');
   });
 
-  it('拒绝缺少 direction 的题面', () => {
-    expect(() =>
-      normalizedCardSchema.parse({
-        ...baseCard,
-        quiz_items: [{ question: 'A 对应什么？', answer: 'B' }],
-      }),
-    ).toThrow();
+  it('题型明确时为缺少 direction 的题面补齐方向', () => {
+    const single = normalizedCardSchema.parse({
+      ...baseCard,
+      quiz_items: [{ question: 'A 对应什么？', answer: 'B' }],
+    });
+    const bidirectional = normalizedCardSchema.parse({
+      ...baseCard,
+      question_type: 'bidirectional',
+      quiz_items: [
+        { question: 'A 对应什么？', answer: 'B' },
+        { question: 'B 对应什么？', answer: 'A' },
+      ],
+    });
+
+    expect(single.quiz_items.map((item) => item.direction)).toEqual(['single']);
+    expect(bidirectional.quiz_items.map((item) => item.direction)).toEqual(['forward', 'reverse']);
   });
 
   it.each([
     {
       name: 'single 使用 forward',
       value: { ...baseCard, quiz_items: [{ direction: 'forward', question: 'A？', answer: 'B' }] },
-    },
-    {
-      name: 'single 包含两个题面',
-      value: {
-        ...baseCard,
-        quiz_items: [
-          { direction: 'single', question: 'A？', answer: 'B' },
-          { direction: 'single', question: 'B？', answer: 'A' },
-        ],
-      },
     },
     {
       name: 'bidirectional 只有 forward',
@@ -85,12 +84,64 @@ describe('AI 结构校验', () => {
         ],
       },
     },
-    {
-      name: 'unstructured 仍包含题面',
-      value: { ...baseCard, question_type: 'unstructured' },
-    },
   ])('拒绝错误方向或数量：$name', ({ value }) => {
     expect(() => normalizedCardSchema.parse(value)).toThrow();
+  });
+
+  it('单向多问题会保留多个题面供后续拆成多张卡片', () => {
+    const value = normalizedCardSchema.parse({
+      ...baseCard,
+      quiz_items: [
+        { direction: 'single', question: '5% 对应多少？', answer: '1.215' },
+        { direction: 'single', question: '10% 对应多少？', answer: '1.46' },
+        { direction: 'single', question: '15% 对应多少？', answer: '1.75' },
+      ],
+    });
+
+    expect(value.quiz_items).toEqual([
+      { direction: 'single', question: '5% 对应多少？', answer: '1.215' },
+      { direction: 'single', question: '10% 对应多少？', answer: '1.46' },
+      { direction: 'single', question: '15% 对应多少？', answer: '1.75' },
+    ]);
+  });
+
+  it('题面直接包含答案时会替换为空位', () => {
+    const value = normalizedCardSchema.parse({
+      ...baseCard,
+      quiz_items: [
+        { direction: 'single', question: '2025 年增长率为 -3.2% 吗？', answer: '-3.2%' },
+      ],
+    });
+
+    expect(value.quiz_items[0]?.question).toBe('2025 年增长率为 ____ 吗？');
+    expect(value.quiz_items[0]?.question).not.toContain('-3.2%');
+  });
+
+  it('题面泄露公式或别称答案时也会替换为空位', () => {
+    const formula = normalizedCardSchema.parse({
+      ...baseCard,
+      quiz_items: [
+        { direction: 'single', question: '基期=现期/(1+r) 是哪个公式？', answer: '现期/(1+r)' },
+      ],
+    });
+    const alias = normalizedCardSchema.parse({
+      ...baseCard,
+      quiz_items: [
+        { direction: 'single', question: '广州的别称是穗吗？', answer: '穗' },
+      ],
+    });
+
+    expect(formula.quiz_items[0]?.question).toBe('基期=____ 是哪个公式？');
+    expect(alias.quiz_items[0]?.question).toBe('广州的别称是____吗？');
+  });
+
+  it('unstructured 多余题面会裁剪为空数组', () => {
+    const value = normalizedCardSchema.parse({
+      ...baseCard,
+      question_type: 'unstructured',
+    });
+
+    expect(value.quiz_items).toEqual([]);
   });
 
   it.each([

@@ -11,6 +11,8 @@ const expectedTables = [
   'app_settings',
   'attachments',
   'card_categories',
+  'card_folder_items',
+  'card_folders',
   'card_tags',
   'cards',
   'categories',
@@ -40,6 +42,7 @@ describe('数据库初始化', () => {
 
     expect(tables.map(({ name }) => name)).toEqual(expectedTables);
     expect(indexes.map(({ name }) => name)).toEqual([
+      'idx_card_folder_items_card_id',
       'idx_cards_ai_status',
       'idx_cards_archived',
       'idx_quiz_items_created_at',
@@ -73,7 +76,7 @@ describe('数据库初始化', () => {
     ]);
   });
 
-  it('全新数据库按顺序迁移到版本 2 并提供模板默认值', () => {
+  it('全新数据库按顺序迁移到版本 5 并提供模板与手动排序默认值', () => {
     const testDatabase = createTestDatabase();
     opened.push(testDatabase);
 
@@ -83,6 +86,11 @@ describe('数据库初始化', () => {
     const templateColumn = testDatabase.db
       .prepare("SELECT name, type, [notnull], dflt_value FROM pragma_table_info('cards') WHERE name = 'template'")
       .get();
+    const manualOrderColumn = testDatabase.db
+      .prepare(
+        "SELECT name, type, [notnull], dflt_value FROM pragma_table_info('cards') WHERE name = 'manual_order'",
+      )
+      .get();
 
     testDatabase.db
       .prepare(`
@@ -91,14 +99,22 @@ describe('数据库初始化', () => {
       `)
       .run('2026-07-17T00:00:00.000Z', '2026-07-17T00:00:00.000Z');
 
-    expect(versions).toEqual([{ version: 1 }, { version: 2 }]);
+    expect(versions).toEqual([
+      { version: 1 },
+      { version: 2 },
+      { version: 3 },
+      { version: 4 },
+      { version: 5 },
+    ]);
     expect(templateColumn).toEqual({ name: 'template', type: 'TEXT', notnull: 1, dflt_value: "''" });
-    expect(testDatabase.db.prepare("SELECT template FROM cards WHERE id = 'default-template'").get()).toEqual({
+    expect(manualOrderColumn).toEqual({ name: 'manual_order', type: 'INTEGER', notnull: 1, dflt_value: '0' });
+    expect(testDatabase.db.prepare("SELECT template, manual_order FROM cards WHERE id = 'default-template'").get()).toEqual({
       template: '',
+      manual_order: 0,
     });
   });
 
-  it('从版本 1 升级到版本 2 时保留原卡片', () => {
+  it('从版本 1 升级到版本 5 时保留原卡片', () => {
     const database = new Database(':memory:');
     try {
       database.exec(readFileSync(resolve(process.cwd(), 'server/db/migrations/001_initial.sql'), 'utf8'));
@@ -114,13 +130,122 @@ describe('数据库初始化', () => {
 
       migrate(database);
 
-      expect(database.prepare("SELECT raw_input, template FROM cards WHERE id = 'version-1-card'").get()).toEqual({
+      expect(database.prepare("SELECT raw_input, template, manual_order FROM cards WHERE id = 'version-1-card'").get()).toEqual({
         raw_input: '版本一原文',
         template: '',
+        manual_order: 0,
       });
       expect(database.prepare('SELECT version FROM schema_migrations ORDER BY version').all()).toEqual([
         { version: 1 },
         { version: 2 },
+        { version: 3 },
+        { version: 4 },
+        { version: 5 },
+      ]);
+    } finally {
+      database.close();
+    }
+  });
+
+  it('从版本 2 升级时修正拆卡产生的重复卡片标题', () => {
+    const database = new Database(':memory:');
+    try {
+      database.exec(readFileSync(resolve(process.cwd(), 'server/db/migrations/001_initial.sql'), 'utf8'));
+      database.exec(readFileSync(resolve(process.cwd(), 'server/db/migrations/002_card_template.sql'), 'utf8'));
+      database
+        .prepare('INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)')
+        .run(1, '2026-07-16T00:00:00.000Z');
+      database
+        .prepare('INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)')
+        .run(2, '2026-07-16T00:00:01.000Z');
+      const insertCard = database.prepare(`
+        INSERT INTO cards (
+          id, entry_mode, raw_input, template, normalized_statement,
+          ai_status, created_at, updated_at
+        ) VALUES (?, 'knowledge', ?, '资料分析', ?, 'ready', ?, ?)
+      `);
+      const insertQuiz = database.prepare(`
+        INSERT INTO quiz_items (id, card_id, direction, question, answer, due_at, created_at)
+        VALUES (?, ?, 'single', ?, ?, ?, ?)
+      `);
+      for (const [id, question, answer, createdAt] of [
+        ['split-a', '5% 对应多少？', '1.215', '2026-07-17T10:00:00.000Z'],
+        ['split-b', '10% 对应多少？', '1.46', '2026-07-17T10:00:03.000Z'],
+        ['split-c', '15% 对应多少？', '1.75', '2026-07-17T10:00:03.000Z'],
+      ] as const) {
+        insertCard.run(
+          id,
+          '年均增长率速算表',
+          '年均增长率速算表',
+          createdAt,
+          createdAt,
+        );
+        insertQuiz.run(
+          `quiz-${id}`,
+          id,
+          question,
+          answer,
+          createdAt,
+          createdAt,
+        );
+      }
+
+      migrate(database);
+
+      expect(database.prepare('SELECT version FROM schema_migrations ORDER BY version').all()).toEqual([
+        { version: 1 },
+        { version: 2 },
+        { version: 3 },
+        { version: 4 },
+        { version: 5 },
+      ]);
+      expect(
+        database
+          .prepare('SELECT id, normalized_statement FROM cards ORDER BY id')
+          .all(),
+      ).toEqual([
+        { id: 'split-a', normalized_statement: '5% 对应多少？' },
+        { id: 'split-b', normalized_statement: '10% 对应多少？' },
+        { id: 'split-c', normalized_statement: '15% 对应多少？' },
+      ]);
+    } finally {
+      database.close();
+    }
+  });
+
+  it('从版本 3 升级时保留卡片数据并补充手动排序默认值', () => {
+    const database = new Database(':memory:');
+    try {
+      database.exec(readFileSync(resolve(process.cwd(), 'server/db/migrations/001_initial.sql'), 'utf8'));
+      database.exec(readFileSync(resolve(process.cwd(), 'server/db/migrations/002_card_template.sql'), 'utf8'));
+      database.exec(
+        readFileSync(resolve(process.cwd(), 'server/db/migrations/003_distinct_split_card_titles.sql'), 'utf8'),
+      );
+      for (const version of [1, 2, 3]) {
+        database
+          .prepare('INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)')
+          .run(version, '2026-07-21T00:00:00.000Z');
+      }
+      database
+        .prepare(`
+          INSERT INTO cards (id, entry_mode, raw_input, template, ai_status, created_at, updated_at)
+          VALUES ('version-3-card', 'knowledge', '版本三原文', '资料分析', 'pending', ?, ?)
+        `)
+        .run('2026-07-21T00:00:00.000Z', '2026-07-21T00:00:00.000Z');
+
+      migrate(database);
+
+      expect(
+        database
+          .prepare("SELECT raw_input, template, manual_order FROM cards WHERE id = 'version-3-card'")
+          .get(),
+      ).toEqual({ raw_input: '版本三原文', template: '资料分析', manual_order: 0 });
+      expect(database.prepare('SELECT version FROM schema_migrations ORDER BY version').all()).toEqual([
+        { version: 1 },
+        { version: 2 },
+        { version: 3 },
+        { version: 4 },
+        { version: 5 },
       ]);
     } finally {
       database.close();
@@ -142,7 +267,13 @@ describe('数据库初始化', () => {
       .all() as Array<{ version: number }>;
 
     expect(categoryCount.count).toBe(69);
-    expect(versions).toEqual([{ version: 1 }, { version: 2 }]);
+    expect(versions).toEqual([
+      { version: 1 },
+      { version: 2 },
+      { version: 3 },
+      { version: 4 },
+      { version: 5 },
+    ]);
   });
 
   it('每次连接启用 WAL 和外键约束', () => {
@@ -225,7 +356,7 @@ describe('数据库初始化', () => {
       .get() as { count: number };
 
     expect(categoryCount.count).toBe(69);
-    expect(migrationCount.count).toBe(2);
+    expect(migrationCount.count).toBe(5);
   });
 
   it('拒绝损坏替换源并保持原数据库可用且能够再次替换', () => {

@@ -8,6 +8,8 @@
 
 **技术栈：** React 18、TypeScript、CSS `backdrop-filter`、Pointer Events、`motion`、Vitest、Testing Library、Playwright CLI。
 
+**实施状态：** 已完成。最终验证为 36 个测试文件、459 项测试通过；类型检查、生产构建、差异检查和 1440×1000、1024×768、390×844 浏览器验收通过。
+
 ---
 
 ## 文件责任图
@@ -71,7 +73,7 @@ describe('液态手势物理', () => {
 实现：
 
 ```ts
-export function projectMomentum(position: number, velocity: number, rate = 0.99) {
+export function projectMomentum(position: number, velocity: number, rate = 0.998) {
   return position + (velocity / 1000) * rate / (1 - rate);
 }
 

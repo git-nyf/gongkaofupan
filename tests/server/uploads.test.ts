@@ -24,8 +24,6 @@ const baseInput: CreateCardInput = {
   template: '常识模板',
   sourceType: 'manual',
   sourceDetail: '',
-  rating: 3,
-  initialMastery: 'unseen',
   attachments: [],
 };
 
@@ -325,7 +323,7 @@ describe('本地图片上传与读取', () => {
     expectSafeError(missing, 404);
   });
 
-  it('删除卡片后级联清理附件记录和对应本地图片', async () => {
+  it('归档后彻底删除卡片会级联清理附件记录和对应本地图片', async () => {
     const { app, database, uploadsDirectory } = setup();
     const card = await createJsonCard(app);
     const added = await request(app)
@@ -337,8 +335,10 @@ describe('本地图片上传与读取', () => {
       .get(card.id) as { stored_name: string };
     const storedPath = path.join(uploadsDirectory, attachment.stored_name);
 
+    const archived = await request(app).patch(`/api/cards/${card.id}`).send({ archived: true });
     const deleted = await request(app).delete(`/api/cards/${card.id}`);
 
+    expect(archived.status).toBe(200);
     expect(deleted.status).toBe(204);
     expect(database.db.prepare('SELECT COUNT(*) AS count FROM attachments').get()).toEqual({ count: 0 });
     expect(existsSync(storedPath)).toBe(false);

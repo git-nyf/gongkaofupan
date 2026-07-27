@@ -1,7 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import type Database from 'better-sqlite3';
 import type {
-  Mastery,
   QuizItemSchedulingState,
   ReviewInput,
   ReviewResult,
@@ -9,7 +8,7 @@ import type {
   StudySessionInput,
   StudySessionResult,
 } from '../../shared/contracts';
-import { masteryRank, scheduleNext } from './scheduler';
+import { scheduleNext, type InternalReviewRating } from './scheduler';
 
 interface DatabaseProvider {
   get(): Database.Database;
@@ -27,13 +26,13 @@ interface CandidateRow {
   question: string;
   answer: string;
   due_at: string;
+  raw_input: string;
   normalized_statement: string;
   analysis: string;
   mnemonic: string;
   extension: string;
   notes: string;
-  rating: number;
-  mastery: Mastery;
+  wrong_count: number;
   archived: number;
 }
 
@@ -73,7 +72,10 @@ export function createStudyService({
     createSession(input) {
       const candidates = findCandidates(database.get(), input);
       const selected = selectCandidates(candidates, input, now().toISOString(), random);
-      return { items: toStudyItems(database.get(), selected) };
+      return {
+        items: toStudyItems(database.get(), selected),
+        totalAvailable: candidates.length,
+      };
     },
 
     review(input) {
@@ -92,6 +94,7 @@ export function createStudyService({
           `)
           .get(input.quizItemId) as ReviewRow | undefined;
         if (!item) throw new StudyServiceError('not_found');
+        const internalRating: InternalReviewRating = input.result === 'unknown' ? 'again' : 'good';
 
         const schedulingState: QuizItemSchedulingState = {
           dueAt: item.due_at,
@@ -105,7 +108,7 @@ export function createStudyService({
           state: item.state,
           lastReviewAt: item.last_review_at,
         };
-        const scheduled = scheduleNext(schedulingState, input.rating, reviewedAt);
+        const scheduled = scheduleNext(schedulingState, internalRating, reviewedAt);
         const nextDueAt = scheduled.card.due.toISOString();
 
         connection
@@ -135,7 +138,7 @@ export function createStudyService({
             scheduled.card.lapses,
             scheduled.card.state,
             scheduled.card.last_review?.toISOString() ?? reviewedAtIso,
-            input.rating,
+            internalRating,
             item.id,
           );
 
@@ -150,29 +153,21 @@ export function createStudyService({
             randomUUID(),
             item.id,
             item.card_id,
-            input.rating,
+            internalRating,
             item.due_at,
             nextDueAt,
             reviewedAtIso,
           );
 
-        if (input.rating === 'again') {
+        if (input.result === 'unknown') {
           connection
             .prepare('UPDATE cards SET wrong_count = wrong_count + 1 WHERE id = ?')
             .run(item.card_id);
         }
 
-        const quizMasteries = connection
-          .prepare('SELECT mastery FROM quiz_items WHERE card_id = ?')
-          .all(item.card_id) as Array<{ mastery: Mastery }>;
-        const cardMastery = quizMasteries.reduce(
-          (weakest, current) =>
-            masteryRank[current.mastery] < masteryRank[weakest] ? current.mastery : weakest,
-          'good' as Mastery,
-        );
         connection
-          .prepare('UPDATE cards SET mastery = ?, updated_at = ? WHERE id = ?')
-          .run(cardMastery, reviewedAtIso, item.card_id);
+          .prepare('UPDATE cards SET updated_at = ? WHERE id = ?')
+          .run(reviewedAtIso, item.card_id);
         const card = connection
           .prepare('SELECT wrong_count FROM cards WHERE id = ?')
           .get(item.card_id) as { wrong_count: number };
@@ -180,10 +175,8 @@ export function createStudyService({
         return {
           quizItemId: item.id,
           cardId: item.card_id,
-          rating: input.rating,
+          result: input.result,
           nextDueAt,
-          quizMastery: input.rating,
-          cardMastery,
           wrongCount: card.wrong_count,
         };
       })();
@@ -197,14 +190,6 @@ function findCandidates(database: Database.Database, input: StudySessionInput): 
   addRelationFilter(filters, parameters, 'card_categories', 'category_id', input.categoryIds);
   addDirectFilter(filters, parameters, 'cards.id', input.cardIds);
   addRelationFilter(filters, parameters, 'card_tags', 'tag_id', input.tagIds);
-  if (input.rating !== undefined) {
-    filters.push('cards.rating = ?');
-    parameters.push(input.rating);
-  }
-  if (input.mastery !== undefined) {
-    filters.push('cards.mastery = ?');
-    parameters.push(input.mastery);
-  }
   if (input.createdFrom !== undefined) {
     filters.push('cards.created_at >= ?');
     parameters.push(input.createdFrom);
@@ -222,13 +207,13 @@ function findCandidates(database: Database.Database, input: StudySessionInput): 
         quiz_items.question,
         quiz_items.answer,
         quiz_items.due_at,
+        cards.raw_input,
         cards.normalized_statement,
         cards.analysis,
         cards.mnemonic,
         cards.extension,
         cards.notes,
-        cards.rating,
-        cards.mastery,
+        cards.wrong_count,
         cards.archived
       FROM cards
       INNER JOIN quiz_items ON quiz_items.card_id = cards.id
@@ -274,24 +259,47 @@ function selectCandidates(
   random: () => number,
 ): CandidateRow[] {
   if (!input.dueFirst) {
-    const ordered = input.order === 'random' ? shuffle(candidates, random) : candidates;
+    const ordered = input.order === 'random' ? weightedSample(candidates, input.count, random) : candidates;
     return ordered.slice(0, input.count);
   }
 
-  const due = candidates.filter((item) => item.due_at <= nowIso).slice(0, input.count);
+  const duePool = candidates.filter((item) => item.due_at <= nowIso);
+  const due = input.order === 'random'
+    ? weightedSample(duePool, input.count, random)
+    : duePool.slice(0, input.count);
   if (due.length === input.count) return due;
   const nonDue = candidates.filter((item) => item.due_at > nowIso);
-  const fill = input.order === 'random' ? shuffle(nonDue, random) : nonDue;
+  const fill = input.order === 'random'
+    ? weightedSample(nonDue, input.count - due.length, random)
+    : nonDue;
   return [...due, ...fill.slice(0, input.count - due.length)];
 }
 
-function shuffle<T>(items: T[], random: () => number): T[] {
-  const shuffled = [...items];
-  for (let index = shuffled.length - 1; index > 0; index -= 1) {
-    const target = Math.floor(random() * (index + 1));
-    [shuffled[index], shuffled[target]] = [shuffled[target], shuffled[index]];
+function weightedSample(items: CandidateRow[], count: number, random: () => number): CandidateRow[] {
+  const cardItemCounts = new Map<string, number>();
+  for (const item of items) {
+    cardItemCounts.set(item.card_id, (cardItemCounts.get(item.card_id) ?? 0) + 1);
   }
-  return shuffled;
+  const pool = items.map((item) => ({
+    item,
+    weight: (1 + item.wrong_count) / (cardItemCounts.get(item.card_id) ?? 1),
+  }));
+  const selected: CandidateRow[] = [];
+  while (pool.length > 0 && selected.length < count) {
+    const totalWeight = pool.reduce((total, entry) => total + entry.weight, 0);
+    let cursor = Math.min(random(), 0.999999999999) * totalWeight;
+    let selectedIndex = pool.length - 1;
+    for (let index = 0; index < pool.length; index += 1) {
+      cursor -= pool[index].weight;
+      if (cursor < 0) {
+        selectedIndex = index;
+        break;
+      }
+    }
+    const [entry] = pool.splice(selectedIndex, 1);
+    selected.push(entry.item);
+  }
+  return selected;
 }
 
 function toStudyItems(database: Database.Database, rows: CandidateRow[]): StudyItem[] {
@@ -337,13 +345,13 @@ function toStudyItems(database: Database.Database, rows: CandidateRow[]): StudyI
       cardId: row.card_id,
       question: row.question,
       answer: row.answer,
+      rawInput: row.raw_input,
       normalizedStatement: row.normalized_statement,
       analysis: row.analysis,
       mnemonic: row.mnemonic,
       extension: row.extension,
       notes: row.notes,
-      rating: row.rating,
-      mastery: row.mastery,
+      wrongCount: row.wrong_count,
       archived: row.archived === 1,
       categories: cardMetadata.categories,
       tags: cardMetadata.tags,

@@ -17,6 +17,7 @@ interface CardFixture {
   createdAt: string;
   dueAt?: string;
   title?: string;
+  wrongCount?: number;
 }
 
 const childCategoryByParent: Record<string, string> = {
@@ -40,13 +41,14 @@ function insertCard(database: TestDatabase, fixture: CardFixture) {
       INSERT INTO cards (
         id, entry_mode, raw_input, normalized_statement, analysis, rating,
         mastery, wrong_count, ai_status, archived, created_at, updated_at
-      ) VALUES (?, 'mistake', ?, ?, '解析', 1, ?, 0, ?, ?, ?, ?)
+      ) VALUES (?, 'mistake', ?, ?, '解析', 1, ?, ?, ?, ?, ?, ?)
     `)
     .run(
       fixture.id,
       `原文-${fixture.id}`,
       fixture.title ?? `标题-${fixture.id}`,
       fixture.mastery ?? 'unseen',
+      fixture.wrongCount ?? 0,
       fixture.aiStatus ?? 'ready',
       fixture.archived ? 1 : 0,
       fixture.createdAt,
@@ -120,6 +122,7 @@ describe('总览与复盘统计', () => {
       id: 'due-again',
       categoryId: '资料分析',
       mastery: 'again',
+      wrongCount: 1,
       createdAt: beforeStart,
       dueAt: start,
     });
@@ -127,6 +130,7 @@ describe('总览与复盘统计', () => {
       id: 'due-hard',
       categoryId: '常识判断',
       mastery: 'hard',
+      wrongCount: 1,
       createdAt: beforeStart,
       dueAt: beforeNext,
     });
@@ -166,7 +170,7 @@ describe('总览与复盘统计', () => {
     expect(response.body).not.toHaveProperty('streakDays');
   });
 
-  it('薄弱板块只按真实复习记录计算 Again*2+Hard 并统计涉及卡片数', async () => {
+  it('薄弱板块只按不会标注记录计算并统计涉及卡片数', async () => {
     const { database, app } = setup();
     const old = '2026-07-10T08:00:00.000Z';
     for (const fixture of [
@@ -188,8 +192,7 @@ describe('总览与复盘统计', () => {
 
     expect(response.status).toBe(200);
     expect(response.body.weakness).toEqual([
-      { categoryId: '资料分析', categoryName: '资料分析', score: 5, cardCount: 2 },
-      { categoryId: '常识判断', categoryName: '常识判断', score: 1, cardCount: 1 },
+      { categoryId: '资料分析', categoryName: '资料分析', score: 2, cardCount: 1 },
     ]);
     expect(
       database.db.prepare('SELECT COUNT(*) AS count FROM card_categories').get(),
@@ -202,7 +205,7 @@ describe('总览与复盘统计', () => {
     );
   });
 
-  it('高频错题按 Again 次数降序并以最近错误时间打破并列', async () => {
+  it('高频不会标注按卡片次数降序并以最近标注时间打破并列', async () => {
     const { database, app } = setup();
     const old = '2026-07-10T08:00:00.000Z';
     for (const fixture of [
@@ -211,7 +214,8 @@ describe('总览与复盘统计', () => {
       { id: 'single-error', title: '单次错误', categoryId: '常识判断' },
       { id: 'hard-only', title: '只有模糊', categoryId: '常识判断' },
     ]) {
-      insertCard(database, { ...fixture, createdAt: old });
+      const wrongCount = fixture.id === 'hard-only' ? 0 : fixture.id === 'single-error' ? 1 : 2;
+      insertCard(database, { ...fixture, wrongCount, createdAt: old });
     }
     insertReview(database, 'older-tie', 'again', '2026-07-11T08:00:00.000Z', 1);
     insertReview(database, 'older-tie', 'again', '2026-07-12T08:00:00.000Z', 2);
@@ -254,7 +258,7 @@ describe('总览与复盘统计', () => {
     insertReview(database, 'weak-card', 'again', '2026-07-11T08:00:00.000Z', 1);
 
     expect((await request(app).get('/api/dashboard')).body.weakness).toEqual([
-      { categoryId: '资料分析', categoryName: '资料分析', score: 2, cardCount: 1 },
+      { categoryId: '资料分析', categoryName: '资料分析', score: 1, cardCount: 1 },
     ]);
     expect((await request(createApp()).get('/api/dashboard')).status).toBe(404);
     expect((await request(createApp()).get('/api/review-summary')).status).toBe(404);

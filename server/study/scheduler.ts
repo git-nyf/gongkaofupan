@@ -6,18 +6,18 @@ import {
   type Card,
   type RecordLogItem,
 } from 'ts-fsrs';
-import type { QuizItemSchedulingState, ReviewInput } from '../../shared/contracts';
+import type { QuizItemSchedulingState } from '../../shared/contracts';
+
+export type InternalReviewRating = 'again' | 'good';
 
 export const masteryRank = { unseen: 0, again: 1, hard: 2, good: 3 } as const;
 
 export function toFsrsRating(
-  rating: ReviewInput['rating'],
-): Rating.Again | Rating.Hard | Rating.Good {
+  rating: InternalReviewRating,
+): Rating.Again | Rating.Good {
   switch (rating) {
     case 'again':
       return Rating.Again;
-    case 'hard':
-      return Rating.Hard;
     case 'good':
       return Rating.Good;
   }
@@ -39,7 +39,7 @@ export function toFsrsCard(item: QuizItemSchedulingState): Card {
 
 export function scheduleNext(
   item: QuizItemSchedulingState,
-  rating: ReviewInput['rating'],
+  rating: InternalReviewRating,
   now: Date,
 ): RecordLogItem {
   const card = item.reps === 0 ? createEmptyCard(now) : toFsrsCard(item);

@@ -13,6 +13,7 @@ type TestDatabase = ReturnType<typeof createTestDatabase>;
 
 interface InsertCardOptions {
   id: string;
+  rawInput?: string;
   createdAt?: string;
   categoryIds?: string[];
   tags?: Array<{ id: string; name: string; origin?: 'user' | 'ai' }>;
@@ -53,7 +54,7 @@ function insertCard(database: TestDatabase, options: InsertCardOptions) {
     `)
     .run(
       options.id,
-      `原文-${options.id}`,
+      options.rawInput ?? `原文-${options.id}`,
       `规范-${options.id}`,
       `解析-${options.id}`,
       `口诀-${options.id}`,
@@ -192,21 +193,27 @@ describe('混合卡组与题面复习', () => {
       service
         .createSession(sessionInput({ count: 4, dueFirst: true, order: 'random' }))
         .items.map(({ quizItemId }) => quizItemId),
-    ).toEqual(['due-a', 'due-b', 'future-b', 'future-a']);
+    ).toEqual(['due-a', 'due-b', 'future-a', 'future-b']);
   });
 
-  it('非到期优先的随机模式打乱全部候选后截取且不重复', () => {
+  it('非到期优先的随机模式按不会标注次数加权抽取且不重复', () => {
     const { database, service } = setup(() => 0);
     insertCard(database, {
-      id: 'card-a',
-      quizItems: [{ id: 'quiz-a' }, { id: 'quiz-b' }, { id: 'quiz-c' }],
+      id: 'low',
+      wrongCount: 0,
+      quizItems: [{ id: 'low-a' }],
+    });
+    insertCard(database, {
+      id: 'high',
+      wrongCount: 5,
+      quizItems: [{ id: 'high-a' }, { id: 'high-b' }],
     });
 
     const ids = service
-      .createSession(sessionInput({ count: 2, order: 'random' }))
+      .createSession(sessionInput({ count: 3, order: 'random' }))
       .items.map(({ quizItemId }) => quizItemId);
 
-    expect(ids).toEqual(['quiz-b', 'quiz-c']);
+    expect(ids).toEqual(['high-a', 'high-b', 'low-a']);
     expect(new Set(ids).size).toBe(ids.length);
   });
 
@@ -234,14 +241,12 @@ describe('混合卡组与题面复习', () => {
     ).toEqual(['forward', 'reverse']);
   });
 
-  it('分别支持一级/二级分类、卡片、标签、星级、掌握度和日期筛选', () => {
+  it('分别支持一级/二级分类、卡片、标签和日期筛选', () => {
     const { database, service } = setup();
     insertCard(database, {
       id: 'target',
       categoryIds: ['常识判断', '常识判断/法律'],
       tags: [{ id: 'tag-target', name: '目标标签' }],
-      rating: 4,
-      mastery: 'hard',
       createdAt: '2026-07-15T12:00:00.000Z',
       quizItems: [{ id: 'target-quiz' }],
     });
@@ -249,8 +254,6 @@ describe('混合卡组与题面复习', () => {
       id: 'other',
       categoryIds: ['言语理解', '言语理解/逻辑填空'],
       tags: [{ id: 'tag-other', name: '其他标签' }],
-      rating: 2,
-      mastery: 'good',
       createdAt: '2026-07-14T12:00:00.000Z',
       quizItems: [{ id: 'other-quiz' }],
     });
@@ -260,8 +263,6 @@ describe('混合卡组与题面复习', () => {
       { categoryIds: ['常识判断/法律'] },
       { cardIds: ['target'] },
       { tagIds: ['tag-target'] },
-      { rating: 4 },
-      { mastery: 'hard' },
       {
         createdFrom: '2026-07-15T00:00:00.000Z',
         createdTo: '2026-07-15T23:59:59.999Z',
@@ -280,16 +281,12 @@ describe('混合卡组与题面复习', () => {
     insertCard(database, {
       id: 'target',
       tags: [{ id: 'tag-target', name: '目标标签' }],
-      rating: 5,
-      mastery: 'good',
       createdAt: '2026-07-15T12:00:00.000Z',
       quizItems: [{ id: 'target-quiz' }],
     });
     insertCard(database, {
       id: 'other',
       tags: [{ id: 'tag-other', name: '其他标签' }],
-      rating: 4,
-      mastery: 'hard',
       quizItems: [{ id: 'other-quiz' }],
     });
 
@@ -298,8 +295,6 @@ describe('混合卡组与题面复习', () => {
         categoryIds: ['不存在分类', '常识判断/法律'],
         cardIds: ['missing', 'target'],
         tagIds: ['missing-tag', 'tag-target'],
-        rating: 5,
-        mastery: 'good',
         createdFrom: '2026-07-15T00:00:00.000Z',
         createdTo: '2026-07-15T23:59:59.999Z',
       }),
@@ -316,12 +311,12 @@ describe('混合卡组与题面复习', () => {
     const { database, service } = setup();
     insertCard(database, {
       id: 'detail',
+      rawInput: '完整原始输入第一行\n分数 3/5 与第二行',
       tags: [
         { id: 'tag-user', name: '用户标签', origin: 'user' },
         { id: 'tag-ai', name: 'AI标签', origin: 'ai' },
       ],
-      rating: 3,
-      mastery: 'hard',
+      wrongCount: 7,
       quizItems: [{ id: 'detail-quiz', question: '明确问题', answer: '明确答案' }],
     });
 
@@ -332,13 +327,13 @@ describe('混合卡组与题面复习', () => {
       cardId: 'detail',
       question: '明确问题',
       answer: '明确答案',
+      rawInput: '完整原始输入第一行\n分数 3/5 与第二行',
       normalizedStatement: '规范-detail',
       analysis: '解析-detail',
       mnemonic: '口诀-detail',
       extension: '拓展-detail',
       notes: '笔记-detail',
-      rating: 3,
-      mastery: 'hard',
+      wrongCount: 7,
       archived: false,
       categories: [
         { id: '常识判断', name: '常识判断', parentId: null },
@@ -371,6 +366,7 @@ describe('混合卡组与题面复习', () => {
 
     const valid = await request(app).post('/api/study/sessions').send(validBody);
     expect(valid.status).toBe(200);
+    expect(valid.body.totalAvailable).toBe(1);
     expect(valid.body.items.map((item: { quizItemId: string }) => item.quizItemId)).toEqual([
       'target-quiz',
     ]);
@@ -407,10 +403,9 @@ describe('混合卡组与题面复习', () => {
   });
 
   it.each([
-    ['again', 1],
-    ['hard', 0],
-    ['good', 0],
-  ] as const)('复习 %s 全量写回 FSRS、日志和错误次数', async (rating, wrongDelta) => {
+    ['unknown', 'again', 1],
+    ['known', 'good', 0],
+  ] as const)('复习 %s 全量写回 FSRS、日志和不会标注次数', async (result, internalRating, wrongDelta) => {
     const { app, database } = setup();
     const original = {
       dueAt: '2026-07-16T10:00:00.000Z',
@@ -429,20 +424,18 @@ describe('混合卡组与题面复习', () => {
       wrongCount: 4,
       quizItems: [{ id: 'review-quiz', ...original }],
     });
-    const expected = scheduleNext(original, rating, fixedNow);
+    const expected = scheduleNext(original, internalRating, fixedNow);
 
     const response = await request(app)
       .post('/api/reviews')
-      .send({ quizItemId: 'review-quiz', rating });
+      .send({ quizItemId: 'review-quiz', result });
 
     expect(response.status).toBe(200);
     expect(response.body).toEqual({
       quizItemId: 'review-quiz',
       cardId: 'review-card',
-      rating,
+      result,
       nextDueAt: expected.card.due.toISOString(),
-      quizMastery: rating,
-      cardMastery: rating,
       wrongCount: 4 + wrongDelta,
     });
     expect(
@@ -464,19 +457,19 @@ describe('混合卡组与题面复习', () => {
       lapses: expected.card.lapses,
       state: expected.card.state,
       last_review_at: expected.card.last_review!.toISOString(),
-      mastery: rating,
+      mastery: internalRating,
     });
     expect(database.db.prepare('SELECT * FROM review_logs').get()).toMatchObject({
       quiz_item_id: 'review-quiz',
       card_id: 'review-card',
-      rating,
+      rating: internalRating,
       previous_due_at: original.dueAt,
       next_due_at: expected.card.due.toISOString(),
       reviewed_at: fixedNow.toISOString(),
     });
   });
 
-  it('双题面独立复习并以最弱题面聚合卡片掌握度', async () => {
+  it('双题面独立复习并共享卡片级不会标注次数', async () => {
     const { app, database } = setup();
     insertCard(database, {
       id: 'double',
@@ -489,15 +482,15 @@ describe('混合卡组与题面复习', () => {
 
     const first = await request(app)
       .post('/api/reviews')
-      .send({ quizItemId: 'reverse', rating: 'good' });
+      .send({ quizItemId: 'reverse', result: 'unknown' });
     const second = await request(app)
       .post('/api/reviews')
-      .send({ quizItemId: 'forward', rating: 'hard' });
+      .send({ quizItemId: 'forward', result: 'known' });
 
-    expect(first.body.cardMastery).toBe('again');
-    expect(second.body.cardMastery).toBe('hard');
-    expect(database.db.prepare("SELECT mastery FROM cards WHERE id = 'double'").get()).toEqual({
-      mastery: 'hard',
+    expect(first.body.wrongCount).toBe(1);
+    expect(second.body.wrongCount).toBe(1);
+    expect(database.db.prepare("SELECT wrong_count FROM cards WHERE id = 'double'").get()).toEqual({
+      wrong_count: 1,
     });
   });
 
@@ -521,7 +514,7 @@ describe('混合卡组与题面复习', () => {
 
     const response = await request(app)
       .post('/api/reviews')
-      .send({ quizItemId: 'rollback-quiz', rating: 'again' });
+      .send({ quizItemId: 'rollback-quiz', result: 'unknown' });
 
     expect(response.status).toBe(500);
     expect(response.body).toEqual({ code: 'internal_error', message: expect.any(String) });
@@ -542,20 +535,21 @@ describe('混合卡组与题面复习', () => {
 
     const reviewed = await request(app)
       .post('/api/reviews')
-      .send({ quizItemId: 'current-quiz', rating: 'hard' });
+      .send({ quizItemId: 'current-quiz', result: 'known' });
     expect(reviewed.status).toBe(200);
 
     const missing = await request(app)
       .post('/api/reviews')
-      .send({ quizItemId: 'missing', rating: 'good' });
+      .send({ quizItemId: 'missing', result: 'known' });
     expect(missing.status).toBe(404);
     expect(missing.body).toEqual({ code: 'not_found', message: expect.any(String) });
 
     for (const body of [
       {},
-      { quizItemId: '', rating: 'good' },
-      { quizItemId: 'current-quiz', rating: 'easy' },
-      { quizItemId: 'current-quiz', rating: 'good', extra: true },
+      { quizItemId: '', result: 'known' },
+      { quizItemId: 'current-quiz', result: 'hard' },
+      { quizItemId: 'current-quiz', rating: 'good' },
+      { quizItemId: 'current-quiz', result: 'known', extra: true },
     ]) {
       expect((await request(app).post('/api/reviews').send(body)).status).toBe(400);
     }

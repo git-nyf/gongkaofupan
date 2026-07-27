@@ -22,8 +22,6 @@ const studySessionSchema = z
     categoryIds: identifierArraySchema,
     cardIds: identifierArraySchema,
     tagIds: identifierArraySchema,
-    rating: z.union([z.literal(1), z.literal(2), z.literal(3), z.literal(4), z.literal(5)]).optional(),
-    mastery: z.enum(['unseen', 'again', 'hard', 'good']).optional(),
     createdFrom: dateSchema(false).optional(),
     createdTo: dateSchema(true).optional(),
     count: z.number().int().min(1).max(100),
@@ -38,7 +36,7 @@ const studySessionSchema = z
 const reviewSchema = z
   .object({
     quizItemId: z.string().transform((value) => value.trim()).refine(Boolean),
-    rating: z.enum(['again', 'hard', 'good']),
+    result: z.enum(['unknown', 'known']),
   })
   .strict();
 

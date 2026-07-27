@@ -1,24 +1,34 @@
 import express from 'express';
 import { z } from 'zod';
 import type { createDatabaseManager } from '../db/database';
+import { isAllowedQqMusicPath } from '../localApps/qqMusic';
 
 type DatabaseManager = Pick<ReturnType<typeof createDatabaseManager>, 'get'>;
 
 export interface SettingsRouterDependencies {
   database: DatabaseManager;
   deepseekApiKey: string;
+  isQqMusicAvailable?: (configuredPath: string) => boolean;
 }
 
 const defaultSettings = {
   defaultSessionSize: 20,
   defaultOrder: 'random' as const,
   dueFirst: true,
+  defaultFocusMinutes: 25 as const,
+  qqMusicPath: '',
 };
 
 const settingSchemas = {
   defaultSessionSize: z.number().int().min(1).max(100),
   defaultOrder: z.enum(['fixed', 'random']),
   dueFirst: z.boolean(),
+  defaultFocusMinutes: z.union([z.literal(5), z.literal(15), z.literal(25), z.literal(45)]),
+  qqMusicPath: z
+    .string()
+    .trim()
+    .max(1024)
+    .refine((value) => value === '' || isAllowedQqMusicPath(value)),
 };
 
 const patchSchema = z
@@ -31,6 +41,8 @@ type Settings = {
   defaultSessionSize: number;
   defaultOrder: 'fixed' | 'random';
   dueFirst: boolean;
+  defaultFocusMinutes: 5 | 15 | 25 | 45;
+  qqMusicPath: string;
 };
 
 interface SettingRow {
@@ -38,12 +50,16 @@ interface SettingRow {
   value_json: string;
 }
 
-export function createSettingsRouter({ database, deepseekApiKey }: SettingsRouterDependencies) {
+export function createSettingsRouter({
+  database,
+  deepseekApiKey,
+  isQqMusicAvailable = () => false,
+}: SettingsRouterDependencies) {
   const router = express.Router();
 
   router.get('/api/settings', (_request, response) => {
     try {
-      response.status(200).json(readResponse(database, deepseekApiKey));
+      response.status(200).json(readResponse(database, deepseekApiKey, isQqMusicAvailable));
     } catch {
       response.status(500).json({ code: 'internal_error', message: '设置读取失败' });
     }
@@ -65,7 +81,7 @@ export function createSettingsRouter({ database, deepseekApiKey }: SettingsRoute
         for (const [key, value] of Object.entries(parsed.data)) {
           write.run(key, JSON.stringify(value));
         }
-        return readResponse(database, deepseekApiKey);
+        return readResponse(database, deepseekApiKey, isQqMusicAvailable);
       });
       response.status(200).json(update());
     } catch {
@@ -76,13 +92,17 @@ export function createSettingsRouter({ database, deepseekApiKey }: SettingsRoute
   return router;
 }
 
-function readResponse(database: DatabaseManager, deepseekApiKey: string) {
+function readResponse(
+  database: DatabaseManager,
+  deepseekApiKey: string,
+  isQqMusicAvailable: (configuredPath: string) => boolean,
+) {
   const rows = database
     .get()
     .prepare(`
       SELECT key, value_json
       FROM app_settings
-      WHERE key IN ('defaultSessionSize', 'defaultOrder', 'dueFirst')
+      WHERE key IN ('defaultSessionSize', 'defaultOrder', 'dueFirst', 'defaultFocusMinutes', 'qqMusicPath')
     `)
     .all() as SettingRow[];
   const settings: Settings = { ...defaultSettings };
@@ -94,6 +114,7 @@ function readResponse(database: DatabaseManager, deepseekApiKey: string) {
 
   return {
     ...settings,
+    qqMusicAvailable: isQqMusicAvailable(settings.qqMusicPath),
     deepseekConfigured: deepseekApiKey.trim().length > 0,
   };
 }
