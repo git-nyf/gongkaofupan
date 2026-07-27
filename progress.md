@@ -3094,3 +3094,31 @@
 - `.gitignore`：补充环境文件、数据库、错题图片、备份和日志忽略规则，并继续允许提交 `.env.example`。
 - `progress.md`：仅在末尾追加本轮安全审计、验证、文件清单与回滚说明。
 - 回滚方式：执行 `git restore --source=HEAD -- .gitignore progress.md` 可撤销本轮发布前隔离记录；若已经产生后续提交，应使用 `git revert <提交编号>`，不要删除本机 `data/`、`.env` 或错题图片。
+
+## 2026-07-27 - Task: 编写带隐私打码截图的项目 README
+
+### What was done
+
+- 将根目录 README 扩展为完整项目说明，覆盖总览、录入、背诵、卡片库、错题复盘、DIY 设置、数据隐私、系统结构、启动方式、常用命令和目录职责。
+- 使用真实运行页面生成六张 1440×960 界面截图；卡片正文、AI 题面、答案、错题图片、文件夹和板块名称、统计数量及本机配置均在截图生成阶段直接打码。
+- 截图采用压缩 JPEG 并纳入正式文档资源，六张图片合计小于 600 KB，不引用本机临时输出目录或真实用户数据。
+
+### Testing
+
+- Playwright 依次打开总览、录入、背诵、卡片库、复盘和设置六个路由并完成截图，浏览器控制台错误数为 0。
+- 人工逐张检查六张截图：页面构图完整，卡片正文与本机数据不可辨认，复盘错题原图已转换为强模糊灰阶轮廓。
+- 文档资源检查：六张图片均存在，分辨率统一为 1440×960，README 中的六个截图引用和数据管理文档引用均可解析。
+- `git check-ignore -v`：确认 `.env`、`data/`、Playwright 会话和临时截图继续被忽略，正式 README 图片位于 `docs/readme-assets/`。
+- `git diff --check`：通过，仅有工作树既有 LF/CRLF 转换提示；本轮未修改业务代码，因此未重复执行代码测试套件。
+
+### Notes
+
+- `README.md`：重写为覆盖系统能力、隐私边界、架构和运行方式的中文项目首页。
+- `docs/readme-assets/readme-dashboard.jpg`：新增已打码的总览页面截图。
+- `docs/readme-assets/readme-entry.jpg`：新增录入页面截图。
+- `docs/readme-assets/readme-study.jpg`：新增已隐藏题量的背诵封面截图。
+- `docs/readme-assets/readme-cards.jpg`：新增已隐藏正文、文件夹与统计的卡片库截图。
+- `docs/readme-assets/readme-review.jpg`：新增已隐藏板块信息并强模糊错题原图的复盘截图。
+- `docs/readme-assets/readme-settings.jpg`：新增设置与 DIY 主题页面截图。
+- `progress.md`：仅在末尾追加本轮文档、隐私处理、验证和回滚记录。
+- 回滚方式：执行 `git restore -- README.md progress.md`，再执行 `Remove-Item -LiteralPath @('docs\\readme-assets\\readme-dashboard.jpg','docs\\readme-assets\\readme-entry.jpg','docs\\readme-assets\\readme-study.jpg','docs\\readme-assets\\readme-cards.jpg','docs\\readme-assets\\readme-review.jpg','docs\\readme-assets\\readme-settings.jpg')` 删除本轮新增截图；本轮未修改业务代码和本机数据，无需数据回滚。
