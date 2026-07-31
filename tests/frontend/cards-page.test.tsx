@@ -135,6 +135,10 @@ beforeEach(() => {
     configurable: true,
     value: () => null,
   });
+  Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', {
+    configurable: true,
+    value: vi.fn(),
+  });
   window.history.pushState({}, '', '/');
   vi.stubGlobal('fetch', vi.fn());
   vi.stubGlobal('confirm', vi.fn(() => true));
@@ -317,6 +321,75 @@ describe('卡片库筛选与状态', () => {
 });
 
 describe('卡片库初始稿文件夹', () => {
+  it('文件夹以固定尺寸卡片网格换行且每行最多六个', async () => {
+    const css = await readFile('src/styles/cards-glass.css', 'utf8');
+
+    expect(css).toMatch(/\.cards-folder-scroll\s*\{[^}]*overflow-x:\s*visible/);
+    expect(css).toMatch(/\.cards-folder-list\s*\{[^}]*display:\s*grid;[^}]*width:\s*100%;[^}]*max-width:\s*1370px;[^}]*grid-template-columns:\s*repeat\(auto-fill,\s*minmax\(min\(220px,\s*100%\),\s*220px\)\)/);
+    expect(css).toMatch(/\.cards-folder-tile\.liquid-glass\s*\{[^}]*width:\s*100%;[^}]*min-width:\s*0/);
+  });
+
+  it('文件夹内定位链接会清除冲突筛选并滚动高亮对应初始稿', async () => {
+    const target = card({
+      id: 'target-card',
+      rawInput: '目标原始资料',
+      rawContentJson: '',
+      normalizedStatement: '目标问题',
+    });
+    const fetchMock = vi.mocked(fetch).mockImplementation(async (input) => {
+      const path = String(input);
+      if (path === '/api/cards/folders') {
+        return jsonResponse([folder({ cardIds: [target.id] })]);
+      }
+      if (path === '/api/cards/folders/folder-1/cards') {
+        return jsonResponse({ folder: folder({ cardIds: [target.id] }), cards: [target] });
+      }
+      const request = new URL(path, 'http://localhost');
+      if (request.pathname === '/api/cards' && request.searchParams.get('query') === target.rawInput) {
+        return jsonResponse(searchResult([target]));
+      }
+      if (request.pathname === '/api/cards') {
+        return jsonResponse({ items: [], total: 60, page: 3, pageSize: 20 });
+      }
+      throw new Error('unexpected request: ' + path);
+    });
+    const user = userEvent.setup();
+    renderAt('/cards?contentVersion=original&query=旧筛选&categoryIds=常识判断&tagIds=tag-old&aiStatus=needs_input&createdFrom=2026-07-01&createdTo=2026-07-31&page=3&pageSize=20');
+
+    await user.click(await screen.findByRole('button', { name: '打开公考资料夹' }));
+    const folderPreview = await screen.findByRole('list', { name: '公考资料夹中的卡片' });
+    const locateLink = within(folderPreview).getByRole('link', { name: '定位目标问题在卡片库中的原卡' });
+    expect(locateLink).toHaveAttribute('href', '#card-library-target-card');
+    await user.click(locateLink);
+
+    await waitFor(() => {
+      const params = new URLSearchParams(window.location.search);
+      expect(params.get('query')).toBe(target.rawInput);
+      expect(params.get('page')).toBe('1');
+      expect(params.getAll('categoryIds')).toEqual([]);
+      expect(params.getAll('tagIds')).toEqual([]);
+      expect(params.has('aiStatus')).toBe(false);
+      expect(params.has('createdFrom')).toBe(false);
+      expect(params.has('createdTo')).toBe(false);
+    });
+
+    const targetCard = await waitFor(() => {
+      const element = document.getElementById('card-library-target-card');
+      expect(element).not.toBeNull();
+      return element!;
+    });
+    expect(targetCard).toHaveClass('is-located');
+    expect(targetCard).toHaveAttribute('tabindex', '-1');
+    expect(targetCard).toHaveFocus();
+    expect(HTMLElement.prototype.scrollIntoView).toHaveBeenCalledWith({ behavior: 'smooth', block: 'center' });
+
+    const locatedRequest = fetchMock.mock.calls
+      .map(([input]) => new URL(String(input), 'http://localhost'))
+      .find((request) => request.pathname === '/api/cards' && request.searchParams.get('query') === target.rawInput);
+    expect(locatedRequest?.searchParams.get('archived')).toBe('false');
+    expect(locatedRequest?.searchParams.get('contentVersion')).toBe('original');
+  });
+
   it('仅在用户初始稿主卡片显示全部文件夹归属且不显示空占位', async () => {
     const groupedCards = [
       card({ rawInput: '同一份原始资料', rawContentJson: '', normalizedStatement: '第一道衍生问题' }),

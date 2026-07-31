@@ -1,5 +1,5 @@
 import { useState, type DragEvent, type FormEvent } from 'react';
-import { Eye, Folder, FolderMinus, LoaderCircle, Plus, Trash2 } from 'lucide-react';
+import { Eye, Folder, FolderMinus, LoaderCircle, LocateFixed, Plus, Trash2 } from 'lucide-react';
 import type { CardDetail, CardFolderSummary } from '../../shared/contracts';
 import { RichTextPreview } from './RichTextPreview';
 
@@ -24,6 +24,7 @@ interface CardFolderShelfProps {
   onCreate: (name: string) => Promise<boolean>;
   onDelete: (folder: CardFolderSummary) => void;
   onDetail: (group: CardFolderCardGroup, trigger: HTMLButtonElement) => void;
+  onLocate: (group: CardFolderCardGroup) => void;
   onRemoveCards: (folderId: string, cardIds: string[]) => void;
   onToggle: (folderId: string) => void;
 }
@@ -42,6 +43,7 @@ export function CardFolderShelf({
   onCreate,
   onDelete,
   onDetail,
+  onLocate,
   onRemoveCards,
   onToggle,
 }: CardFolderShelfProps) {
@@ -187,6 +189,18 @@ export function CardFolderShelf({
                       </h4>
                     </div>
                     <div className="cards-folder-preview__footer">
+                      <a
+                        aria-label={'定位' + title + '在卡片库中的原卡'}
+                        className="cards-folder-preview__locate liquid-pressable"
+                        href={'#card-library-' + card.id}
+                        onClick={(event) => {
+                          event.preventDefault();
+                          onLocate(group);
+                        }}
+                        title="定位原卡"
+                      >
+                        <LocateFixed aria-hidden="true" size={16} />
+                      </a>
                       <button
                         aria-label={'查看' + title + '详情'}
                         className="liquid-pressable"

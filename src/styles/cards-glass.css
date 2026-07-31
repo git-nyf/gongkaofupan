@@ -147,14 +147,14 @@
 .cards-folder-scroll {
   margin-top: 10px;
   padding: 2px 2px 7px;
-  overflow-x: auto;
-  overscroll-behavior-inline: contain;
+  overflow-x: visible;
 }
 
 .cards-folder-list {
-  display: flex;
-  width: max-content;
-  min-width: 100%;
+  display: grid;
+  width: 100%;
+  max-width: 1370px;
+  grid-template-columns: repeat(auto-fill, minmax(min(220px, 100%), 220px));
   gap: 10px;
   margin: 0;
   padding: 0;
@@ -164,8 +164,8 @@
 .cards-folder-tile.liquid-glass {
   position: relative;
   display: flex;
-  width: 220px;
-  min-width: 220px;
+  width: 100%;
+  min-width: 0;
   min-height: 78px;
   align-items: stretch;
   border: 1px solid var(--glass-edge);
@@ -283,11 +283,19 @@
   border-top: 1px solid rgba(92, 99, 108, 0.16);
 }
 
-.cards-folder-preview__footer button {
+.cards-folder-preview__footer button,
+.cards-folder-preview__footer a {
+  display: inline-flex;
   width: 44px;
   min-width: 44px;
   height: 44px;
+  align-items: center;
+  justify-content: center;
   border-radius: var(--glass-radius-control);
+}
+
+.cards-folder-preview__locate {
+  color: var(--color-accent);
 }
 
 .cards-folder-preview__remove {
@@ -368,6 +376,21 @@
     var(--glass-shadow-sm);
   -webkit-backdrop-filter: blur(var(--glass-blur-regular)) saturate(var(--glass-saturation));
   backdrop-filter: blur(var(--glass-blur-regular)) saturate(var(--glass-saturation));
+}
+
+.cards-card.is-located {
+  outline: 3px solid rgba(198, 66, 50, 0.44);
+  outline-offset: 3px;
+  box-shadow:
+    inset 0 1px rgba(255, 255, 255, 0.9),
+    0 0 0 7px rgba(198, 66, 50, 0.1),
+    0 18px 34px rgba(35, 38, 43, 0.16);
+  animation: cards-location-pulse 720ms var(--motion-ease) 2 alternate;
+}
+
+@keyframes cards-location-pulse {
+  from { transform: translateY(0) scale(1); }
+  to { transform: translateY(-3px) scale(1.012); }
 }
 
 .cards-card.liquid-glass:hover {
@@ -625,6 +648,10 @@ html[data-motion='reduced'] .cards-folder-tile.is-drag-over {
   transform: none;
 }
 
+html[data-motion='reduced'] .cards-card.is-located {
+  animation: none;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .cards-card:hover,
   .cards-card:active {
@@ -643,6 +670,10 @@ html[data-motion='reduced'] .cards-folder-tile.is-drag-over {
 
   .cards-folder-tile.is-drag-over {
     transform: none;
+  }
+
+  .cards-card.is-located {
+    animation: none;
   }
 }
 

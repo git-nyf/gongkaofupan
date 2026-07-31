@@ -97,12 +97,15 @@ export function CardsPage() {
   const [exporting, setExporting] = useState(false);
   const [exportError, setExportError] = useState('');
   const [archiveUndo, setArchiveUndo] = useState<{ ids: string[]; message: string }>();
+  const [locateTargetIds, setLocateTargetIds] = useState<string[]>();
+  const [locatedCardIds, setLocatedCardIds] = useState<Set<string>>(() => new Set());
   const [reloadKey, setReloadKey] = useState(0);
   const requestVersion = useRef(0);
   const folderRequestVersion = useRef(0);
   const folderContentRequestVersion = useRef(0);
   const activeFolderIdRef = useRef<string>();
   const detailTrigger = useRef<HTMLButtonElement | null>(null);
+  const locateHighlightTimer = useRef<number>();
 
   const loadFolders = useCallback(async (signal?: AbortSignal) => {
     const version = ++folderRequestVersion.current;
@@ -458,6 +461,59 @@ export function CardsPage() {
     [activeFolderContents?.cards],
   );
 
+  useEffect(() => () => {
+    if (locateHighlightTimer.current !== undefined) {
+      window.clearTimeout(locateHighlightTimer.current);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!locateTargetIds || loadState !== 'ready') return;
+    const targetIdSet = new Set(locateTargetIds);
+    const targetGroup = visibleGroups.find((group) => group.cards.some(({ id }) => targetIdSet.has(id)));
+    if (!targetGroup) return;
+    const target = document.getElementById('card-library-' + targetGroup.card.id);
+    if (!target) return;
+
+    const nextLocatedIds = new Set(targetGroup.cards.map(({ id }) => id));
+    setLocatedCardIds(nextLocatedIds);
+    target.scrollIntoView({
+      behavior: document.documentElement.dataset.motion === 'reduced' ? 'auto' : 'smooth',
+      block: 'center',
+    });
+    target.focus({ preventScroll: true });
+    if (locateHighlightTimer.current !== undefined) {
+      window.clearTimeout(locateHighlightTimer.current);
+    }
+    locateHighlightTimer.current = window.setTimeout(() => {
+      setLocatedCardIds(new Set());
+      locateHighlightTimer.current = undefined;
+    }, 1800);
+    setLocateTargetIds(undefined);
+  }, [loadState, locateTargetIds, visibleGroups]);
+
+  const locateFolderGroup = (group: CardFolderCardGroup) => {
+    const cardIds = group.cards.map(({ id }) => id);
+    const visibleCardIds = new Set(visibleGroups.flatMap(({ cards }) => cards.map(({ id }) => id)));
+    setLocateTargetIds(cardIds);
+    if (cardIds.some((id) => visibleCardIds.has(id))) return;
+
+    const query = group.card.rawInput.trim() || group.card.normalizedStatement.trim();
+    setQueryDraft(query);
+    setLoadState('loading');
+    updateSearchParams(setSearchParams, filters, {
+      aiStatus: '',
+      archived: group.card.archived ? 'true' : 'false',
+      categoryIds: [],
+      contentVersion: 'original',
+      createdFrom: '',
+      createdTo: '',
+      page: 1,
+      query,
+      tagIds: [],
+    });
+  };
+
   return (
     <section className="page cards-page">
       <header className="page__header cards-page__header">
@@ -565,6 +621,7 @@ export function CardsPage() {
           onCreate={createFolder}
           onDelete={(folder) => void deleteFolder(folder)}
           onDetail={openDetail}
+          onLocate={locateFolderGroup}
           onRemoveCards={(folderId, cardIds) => {
             const cards = activeFolderGroups
               .flatMap((group) => group.cards)
@@ -614,6 +671,7 @@ export function CardsPage() {
           contentVersion={contentVersion}
           folderActionName={folderActionName}
           folders={folders}
+          locatedCardIds={locatedCardIds}
           onAddToFolder={(folderId, cardIds) => void addCardsToFolder(folderId, cardIds)}
           onArchivedChange={setCardsArchived}
           onDelete={deleteCards}
@@ -661,6 +719,7 @@ function CardGrid({
   contentVersion,
   folderActionName,
   folders,
+  locatedCardIds,
   onAddToFolder,
   onArchivedChange,
   onDelete,
@@ -676,6 +735,7 @@ function CardGrid({
   contentVersion: CardContentVersion;
   folderActionName: string;
   folders: CardFolderSummary[];
+  locatedCardIds: Set<string>;
   onAddToFolder: (folderId: string, cardIds: string[]) => void;
   onArchivedChange: (cards: CardDetail[], archived: boolean) => void;
   onDelete: (cards: CardDetail[]) => void;
@@ -699,6 +759,7 @@ function CardGrid({
           ? folders.filter((folder) => folder.cardIds.some((id) => groupIdSet.has(id)))
           : [];
         const groupSelected = groupIds.every((id) => selected.has(id));
+        const isLocated = groupIds.some((id) => locatedCardIds.has(id));
         const isDerivedGroup = group.cards.length > 1;
         const groupWrongCount = Math.max(...group.cards.map(({ wrongCount }) => wrongCount));
         const editPath = contentVersion === 'original'
@@ -707,8 +768,9 @@ function CardGrid({
         const editLabel = contentVersion === 'original' ? '编辑初始稿' : '编辑';
         return (
           <li
-            className="cards-card liquid-glass liquid-glass--regular"
+            className={`cards-card liquid-glass liquid-glass--regular${isLocated ? ' is-located' : ''}`}
             draggable={contentVersion === 'original' ? true : undefined}
+            id={'card-library-' + card.id}
             key={card.id}
             onDragStart={contentVersion === 'original'
               ? (event) => {
@@ -716,6 +778,7 @@ function CardGrid({
                 event.dataTransfer.setData(CARD_GROUP_DRAG_TYPE, JSON.stringify(groupIds));
               }
               : undefined}
+            tabIndex={-1}
           >
             <div className="cards-card__preview">
               <div className="cards-card__status">

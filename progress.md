@@ -3122,3 +3122,31 @@
 - `docs/readme-assets/readme-settings.jpg`：新增设置与 DIY 主题页面截图。
 - `progress.md`：仅在末尾追加本轮文档、隐私处理、验证和回滚记录。
 - 回滚方式：执行 `git restore -- README.md progress.md`，再执行 `Remove-Item -LiteralPath @('docs\\readme-assets\\readme-dashboard.jpg','docs\\readme-assets\\readme-entry.jpg','docs\\readme-assets\\readme-study.jpg','docs\\readme-assets\\readme-cards.jpg','docs\\readme-assets\\readme-review.jpg','docs\\readme-assets\\readme-settings.jpg')` 删除本轮新增截图；本轮未修改业务代码和本机数据，无需数据回滚。
+
+## 2026-07-31 - Task: 优化初始稿文件夹换行排列并增加原卡定位
+
+### What was done
+
+- 将用户初始稿文件夹从横向滚动列表改为固定 220 像素卡片网格，按可用宽度自动换行，宽屏每行最多六个，后续文件夹进入下一行。
+- 文件夹内每份初始稿新增“定位原卡”链接；目标已在当前列表时直接滚动，受筛选或分页遮挡时自动按原稿检索并回到第一页，再聚焦和短暂高亮对应主卡片。
+- 定位过程只调整卡片库当前筛选和视口，不修改卡片内容、人工排序、归档状态或文件夹引用。
+
+### Testing
+
+- 测试驱动红灯：新增网格样式和原卡定位用例，分别稳定复现现有横向滚动布局与缺少定位链接；实现后卡片库专项 58 项全部通过。
+- `npm run typecheck`：通过，前端与服务端 TypeScript 检查无错误。
+- `npm run build`：通过，客户端与服务端生产构建成功，仅保留既有客户端主包大于 500KB 的非阻塞提示。
+- `npm test -- --maxWorkers=1 --minWorkers=1`：通过，41 个测试文件、579 项测试全部通过。
+- Playwright 使用临时网络模拟的 8 个文件夹验收：1720×950 视口首行 6 个且共 2 行，390×844 视口无横向溢出；定位后目标主卡获得焦点、描边高亮并进入视区，控制台错误数为 0。
+- `git diff --check`：通过，仅有工作树既有 LF/CRLF 转换提示。
+
+### Notes
+
+- `src/components/CardFolderShelf.tsx`：在文件夹副本操作区新增语义化原卡定位链接。
+- `src/pages/CardsPage.tsx`：接入跨筛选和分页的原稿检索、滚动聚焦及临时高亮状态。
+- `src/styles/cards-glass.css`：将文件夹列表改为最多六列的固定尺寸换行网格，并增加定位链接和目标高亮样式。
+- `tests/frontend/cards-page.test.tsx`：覆盖六列换行规则、筛选重置、滚动聚焦和高亮结果。
+- `README.md`：补充文件夹换行排列与原卡定位能力说明。
+- `docs/本地运行与数据管理.md`：记录定位时的筛选变化、视觉反馈和数据不变边界。
+- `progress.md`：仅在末尾追加本轮实现、验证、文件清单与回滚说明。
+- 回滚方式：执行 `git restore -- README.md docs/本地运行与数据管理.md progress.md src/components/CardFolderShelf.tsx src/pages/CardsPage.tsx src/styles/cards-glass.css tests/frontend/cards-page.test.tsx` 可撤销本轮全部改动；本轮无数据库迁移和真实业务数据写入，无需数据回滚。
