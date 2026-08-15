@@ -98,6 +98,8 @@ export function ReviewPage() {
   const [boards, setBoards] = useState<ReviewBoard[]>([]);
   const [selectedByBoard, setSelectedByBoard] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
+  const [reviewAnchorId, setReviewAnchorId] = useState<string | null>(null);
+  const reviewAnchorHandledRef = useRef<string | null>(null);
   const [loadError, setLoadError] = useState('');
   const [uploadingSectionId, setUploadingSectionId] = useState<string | null>(null);
   const [deletingImageIds, setDeletingImageIds] = useState<Set<string>>(() => new Set());
@@ -147,6 +149,59 @@ export function ReviewPage() {
       cancelled = true;
     };
   }, []);
+
+  useEffect(() => {
+    if (loading) return;
+    const imageId = reviewImageIdFromHash();
+    if (!imageId || reviewAnchorHandledRef.current === imageId) return;
+    const targetItem = items.find(({ id }) => id === imageId);
+    if (!targetItem) return;
+    const targetBoard = boards.find((board) => (
+      !board.hidden && board.sections.some((section) => (
+        section.id === targetItem.sectionId && !section.hidden
+      ))
+    ));
+    const targetSection = targetBoard?.sections.find(({ id, hidden }) => (
+      id === targetItem.sectionId && !hidden
+    ));
+    if (!targetBoard || !targetSection) return;
+
+    reviewAnchorHandledRef.current = imageId;
+    setCollapsedBoardIds((current) => {
+      if (!current.has(targetBoard.id)) return current;
+      const next = new Set(current);
+      next.delete(targetBoard.id);
+      return next;
+    });
+    setSelectedByBoard((current) => (
+      current[targetBoard.id] === targetSection.id
+        ? current
+        : { ...current, [targetBoard.id]: targetSection.id }
+    ));
+    setLibrary((current) => (
+      current.activeBySection[targetSection.id] === targetItem.id
+        ? current
+        : {
+            ...current,
+            activeBySection: {
+              ...current.activeBySection,
+              [targetSection.id]: targetItem.id,
+            },
+          }
+    ));
+    setReviewAnchorId(imageId);
+  }, [boards, items, loading]);
+
+  useEffect(() => {
+    if (!reviewAnchorId) return undefined;
+    const frame = requestAnimationFrame(() => {
+      document.getElementById(`review-item-${reviewAnchorId}`)?.scrollIntoView?.({
+        behavior: 'smooth',
+        block: 'center',
+      });
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [activeBySection, collapsedBoardIds, reviewAnchorId, selectedByBoard]);
 
   useEffect(() => {
     if (!viewerItem) return undefined;
@@ -634,6 +689,7 @@ export function ReviewPage() {
 
                           {selectedSection ? (
                             <ReviewCarousel
+                              linkTargetId={reviewAnchorId}
                               activeId={activeBySection[selectedSection.id] ?? null}
                               boardName={board.name}
                               deletingImageIds={deletingImageIds}
@@ -837,6 +893,7 @@ interface ReviewCarouselProps {
   deletingImageIds: ReadonlySet<string>;
   error: string;
   items: ReviewImage[];
+  linkTargetId: string | null;
   section: ReviewSection;
   uploading: boolean;
   uploadLocked: boolean;
@@ -852,6 +909,7 @@ function ReviewCarousel({
   deletingImageIds,
   error,
   items,
+  linkTargetId,
   section,
   uploading,
   uploadLocked,
@@ -1141,9 +1199,11 @@ function ReviewCarousel({
                 const isActive = slot === 0;
                 return (
                   <figure
-                    className="review-card"
+                    aria-label={`复盘条目 ${item.originalName}`}
+                    className={`review-card${item.id === linkTargetId ? ' is-link-target' : ''}`}
                     data-active={isActive ? 'true' : 'false'}
                     data-slot={slot}
+                    id={`review-item-${item.id}`}
                     key={item.id}
                     style={{ zIndex: 10 - Math.abs(slot) }}
                   >
@@ -1385,6 +1445,18 @@ function firstImageBySection(items: ReviewImage[]) {
   const result: Record<string, string> = {};
   for (const item of items) result[item.sectionId] ??= item.id;
   return result;
+}
+
+function reviewImageIdFromHash() {
+  const prefix = '#review-item-';
+  if (!window.location.hash.startsWith(prefix)) return null;
+  const encodedId = window.location.hash.slice(prefix.length);
+  if (!encodedId) return null;
+  try {
+    return decodeURIComponent(encodedId);
+  } catch {
+    return encodedId;
+  }
 }
 
 function measureCarouselStep(carousel: HTMLElement) {

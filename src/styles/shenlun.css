@@ -1,0 +1,720 @@
+:root {
+  --shenlun-cell-size: 29px;
+  --shenlun-grid-bg: #fff0ed;
+  --shenlun-grid-border: #d98273;
+  --shenlun-overflow-bg: #fde5e1;
+  --shenlun-overflow-border: #d56f61;
+}
+
+.shenlun-page {
+  min-width: 0;
+  color: var(--color-text);
+}
+
+.shenlun-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-4);
+  margin-bottom: var(--space-4);
+}
+
+.shenlun-title-input {
+  width: min(36rem, 100%);
+  margin-top: var(--space-1);
+  padding: 0;
+  background: transparent;
+  border: 0;
+  border-bottom: 1px solid transparent;
+  border-radius: 0;
+  color: var(--color-ink-soft);
+  font-size: 15px;
+}
+
+.shenlun-title-input:focus {
+  border-bottom-color: var(--color-accent);
+  outline: 0;
+}
+
+.shenlun-title-print {
+  display: none;
+  margin-top: var(--space-1);
+  color: var(--color-ink);
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.shenlun-toolbar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  min-width: 0;
+  padding: var(--space-2) 0;
+}
+
+.shenlun-template-switch {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+.shenlun-format-tools {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding-left: var(--space-2);
+  border-left: 1px solid var(--color-border);
+}
+
+.shenlun-color-tools {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 var(--space-1);
+  color: var(--color-muted);
+}
+
+.shenlun-color-swatch {
+  width: 18px;
+  height: 18px;
+  min-width: 18px;
+  padding: 0;
+  border: 2px solid rgba(255, 255, 255, 0.9);
+  border-radius: 50%;
+  box-shadow: 0 0 0 1px rgba(57, 61, 68, 0.24);
+}
+
+.shenlun-color-swatch[aria-pressed='true'] {
+  box-shadow: 0 0 0 2px var(--color-accent);
+}
+
+.shenlun-color-swatch--ink {
+  background-color: #25282d;
+}
+
+.shenlun-color-swatch--red {
+  background-color: #b42318;
+}
+
+.shenlun-color-swatch--blue {
+  background-color: #245b8f;
+}
+
+.shenlun-color-swatch--green {
+  background-color: #276749;
+}
+
+.shenlun-tool-button {
+  display: inline-grid;
+  width: var(--tool-height);
+  height: var(--tool-height);
+  place-items: center;
+  padding: 0;
+}
+
+.shenlun-tool-button--active {
+  background-color: color-mix(in srgb, var(--color-accent) 14%, transparent);
+  color: var(--color-accent);
+}
+
+.shenlun-workspace {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(300px, 1fr);
+  gap: var(--space-4);
+  align-items: stretch;
+  min-width: 0;
+}
+
+.shenlun-sheet-scroll {
+  min-width: 0;
+  min-height: 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  overscroll-behavior-x: contain;
+  padding: 1px;
+}
+
+.shenlun-sheet {
+  display: inline-block;
+  min-width: max-content;
+  vertical-align: top;
+}
+
+.shenlun-grid-frame {
+  position: relative;
+  width: max-content;
+  padding-left: 3.5rem;
+}
+
+.shenlun-markers {
+  position: absolute;
+  top: 1px;
+  left: 0;
+  width: 3.25rem;
+  pointer-events: none;
+}
+
+.shenlun-marker {
+  position: absolute;
+  right: 0;
+  transform: translateY(-50%);
+  white-space: nowrap;
+  color: var(--color-accent);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.shenlun-grid {
+  display: flex;
+  flex-direction: column;
+  grid-template-columns: repeat(25, var(--shenlun-cell-size));
+  grid-auto-rows: var(--shenlun-cell-size);
+  width: max-content;
+  min-width: max-content;
+  flex-shrink: 0;
+  overflow: hidden;
+  background-color: var(--shenlun-grid-bg);
+  border: 1px solid var(--shenlun-grid-border);
+}
+
+.shenlun-row {
+  display: grid;
+  grid-template-columns: repeat(25, var(--shenlun-cell-size));
+  grid-auto-rows: var(--shenlun-cell-size);
+  width: max-content;
+}
+
+.shenlun-cell {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: center;
+  width: var(--shenlun-cell-size);
+  height: var(--shenlun-cell-size);
+  aspect-ratio: 1 / 1;
+  min-width: var(--shenlun-cell-size);
+  min-height: var(--shenlun-cell-size);
+  overflow: hidden;
+  border: 0 solid rgba(198, 66, 50, 0.22);
+  border-right-width: 1px;
+  border-bottom-width: 1px;
+  background-color: transparent;
+  color: var(--color-ink);
+  line-height: 1;
+}
+
+.shenlun-cell--overflow {
+  background-color: var(--shenlun-overflow-bg);
+  border-color: var(--shenlun-overflow-border);
+  color: var(--color-error);
+}
+
+.shenlun-cell--caret {
+  position: relative;
+  box-shadow: inset 2px 0 0 var(--color-accent);
+}
+
+.shenlun-cell--caret-end {
+  box-shadow: inset -2px 0 0 var(--color-accent);
+}
+
+.shenlun-cell--selected {
+  background-color: rgba(90, 143, 170, 0.16);
+}
+
+.shenlun-cell__character {
+  position: relative;
+  display: flex;
+  flex: 1 1 0;
+  align-items: center;
+  align-self: stretch;
+  justify-content: center;
+  min-width: 0;
+  max-width: 100%;
+  height: 100%;
+  overflow: hidden;
+  font-size: 16px;
+  line-height: 1;
+  text-overflow: clip;
+  white-space: nowrap;
+}
+
+.shenlun-cell__character--bold {
+  font-weight: 700;
+}
+
+.shenlun-cell__character--underline {
+  text-decoration: none;
+}
+
+.shenlun-cell__character--strike {
+  text-decoration: none;
+}
+
+.shenlun-cell__character--underline::after,
+.shenlun-cell__character--strike::before {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 1px;
+  background-color: currentColor;
+  content: '';
+  pointer-events: none;
+}
+
+.shenlun-cell__character--underline::after {
+  left: 0;
+  right: 0;
+  bottom: 3px;
+}
+
+.shenlun-cell__character--strike::before {
+  left: 0;
+  right: 0;
+  top: 50%;
+}
+
+.shenlun-cell__character--color-red {
+  color: #b42318;
+}
+
+.shenlun-cell__character--color-blue {
+  color: #245b8f;
+}
+
+.shenlun-cell__character--color-green {
+  color: #276749;
+}
+
+.shenlun-selection-action {
+  position: fixed;
+  z-index: 30;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  min-height: var(--tool-height);
+  padding: 3px 6px;
+  background-color: rgba(255, 255, 255, 0.72);
+  border: 1px solid rgba(255, 255, 255, 0.82);
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(35, 39, 47, 0.14);
+  backdrop-filter: blur(16px) saturate(120%);
+}
+
+.shenlun-input-proxy {
+  position: fixed;
+  z-index: 20;
+  box-sizing: border-box;
+  width: 144px;
+  margin: 0;
+  padding: 0 4px;
+  overflow: hidden;
+  resize: none;
+  background-color: transparent;
+  border: 0;
+  outline: 0;
+  color: var(--color-ink);
+  caret-color: transparent;
+  font-family: inherit;
+  font-size: 16px;
+  line-height: var(--shenlun-cell-size);
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+.shenlun-input-proxy:focus {
+  outline: none;
+}
+
+.shenlun-status {
+  margin: var(--space-1) 0;
+  color: var(--color-ink-soft);
+  font-size: 13px;
+}
+
+.shenlun-status--error,
+.shenlun-status[role="alert"] {
+  color: var(--color-error);
+}
+
+.shenlun-annotation-editor {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.shenlun-connectors {
+  position: absolute;
+  z-index: 3;
+  inset: 0;
+  color: rgba(75, 108, 137, 0.68);
+  pointer-events: none;
+  overflow: visible;
+}
+
+.shenlun-notes-rail {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  min-width: 0;
+  min-height: 0;
+  max-height: calc(100dvh - 180px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: var(--space-3);
+  background-color: rgba(255, 255, 255, 0.22);
+  border: 1px solid rgba(255, 255, 255, 0.68);
+  border-radius: 8px;
+  box-shadow: 0 16px 38px rgba(35, 38, 43, 0.08), inset 0 1px 0 rgba(255, 255, 255, 0.72);
+  backdrop-filter: blur(24px) saturate(160%);
+  -webkit-backdrop-filter: blur(24px) saturate(160%);
+}
+
+.shenlun-standard-answer {
+  display: grid;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  background-color: rgba(255, 255, 255, 0.52);
+  border: 1px solid rgba(255, 255, 255, 0.72);
+  border-radius: 8px;
+  box-shadow: 0 6px 18px rgba(35, 38, 43, 0.05), inset 0 1px 0 rgba(255, 255, 255, 0.82);
+}
+
+.shenlun-standard-answer__print {
+  display: none;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.shenlun-standard-answer__actions,
+.shenlun-annotation-order {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+.shenlun-rail-heading,
+.shenlun-card-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+
+.shenlun-rail-heading h2 {
+  margin: 0;
+  font-size: 15px;
+}
+
+.shenlun-notes-rail textarea {
+  width: 100%;
+  resize: vertical;
+  background-color: rgba(255, 255, 255, 0.46);
+  border-color: rgba(82, 88, 98, 0.16);
+  border-radius: 6px;
+}
+
+.shenlun-file-import {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  min-height: var(--tool-height);
+  padding: 0 var(--space-2);
+  cursor: pointer;
+  font-size: 13px;
+}
+
+.shenlun-file-import input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.shenlun-note-editor {
+  display: grid;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  background-color: rgba(255, 255, 255, 0.38);
+  border: 1px solid rgba(255, 255, 255, 0.68);
+  border-radius: 8px;
+  box-shadow: 0 6px 18px rgba(35, 38, 43, 0.045), inset 0 1px 0 rgba(255, 255, 255, 0.76);
+  backdrop-filter: blur(14px) saturate(135%);
+  -webkit-backdrop-filter: blur(14px) saturate(135%);
+}
+
+.shenlun-note-preview {
+  padding: 0;
+  background-color: transparent;
+  color: var(--color-ink-soft);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  border: 0;
+  border-radius: 0;
+}
+
+.shenlun-note-link {
+  color: var(--color-accent);
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 2px;
+}
+
+.shenlun-annotation-list {
+  display: grid;
+  gap: var(--space-2);
+  min-width: 0;
+  padding: var(--space-3);
+  background-color: rgba(255, 255, 255, 0.28);
+  border: 1px solid rgba(255, 255, 255, 0.62);
+  border-radius: 8px;
+  box-shadow: 0 6px 18px rgba(35, 38, 43, 0.04), inset 0 1px 0 rgba(255, 255, 255, 0.7);
+  backdrop-filter: blur(12px) saturate(130%);
+  -webkit-backdrop-filter: blur(12px) saturate(130%);
+}
+
+.shenlun-annotation-card {
+  min-width: 0;
+  padding: var(--space-3);
+  background-color: rgba(255, 255, 255, 0.48);
+  border: 1px solid rgba(255, 255, 255, 0.72);
+  border-left-color: rgba(75, 108, 137, 0.42);
+  border-radius: 8px;
+  box-shadow: 0 4px 14px rgba(35, 38, 43, 0.045);
+  overflow-wrap: anywhere;
+}
+
+.shenlun-annotation-card--detached {
+  background-color: var(--shenlun-overflow-bg);
+  border-color: var(--shenlun-overflow-border);
+}
+
+.shenlun-annotation-card__quote {
+  margin: 0 0 var(--space-1);
+  color: var(--color-ink);
+  font-weight: 700;
+}
+
+.shenlun-annotation-card__body {
+  margin: 0;
+  color: var(--color-ink-soft);
+  white-space: pre-wrap;
+}
+
+.shenlun-annotation-order {
+  margin-left: auto;
+}
+
+@media (max-width: 1100px) {
+  .shenlun-workspace {
+    grid-template-columns: 1fr;
+  }
+
+  .shenlun-sheet-scroll {
+    overflow-x: auto;
+    overflow-y: hidden;
+  }
+
+  .shenlun-grid {
+    width: max-content;
+    min-width: max-content;
+    flex-shrink: 0;
+  }
+
+  .shenlun-notes-rail {
+    max-height: none;
+  }
+}
+
+@media (max-width: 760px) {
+  .shenlun-page {
+    width: 100%;
+  }
+
+  .shenlun-header {
+    flex-wrap: wrap;
+    gap: var(--space-2);
+  }
+
+  .shenlun-header > strong {
+    margin-left: auto;
+  }
+
+  .shenlun-title-input {
+    max-width: 100%;
+  }
+
+  .shenlun-toolbar {
+    position: sticky;
+    top: 0;
+    z-index: 12;
+    padding: var(--space-2);
+    background-color: rgba(250, 251, 252, 0.86);
+    border: 1px solid rgba(255, 255, 255, 0.88);
+    border-radius: 8px;
+    box-shadow: 0 8px 22px rgba(35, 38, 43, 0.08);
+    backdrop-filter: blur(18px) saturate(145%);
+    -webkit-backdrop-filter: blur(18px) saturate(145%);
+  }
+
+  .shenlun-template-switch {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    flex: 1 0 100%;
+    width: 100%;
+  }
+
+  .shenlun-template-switch button {
+    min-width: 0;
+    padding-inline: var(--space-1);
+  }
+
+  .shenlun-workspace,
+  .shenlun-sheet-scroll,
+  .shenlun-notes-rail {
+    width: 100%;
+    max-width: 100%;
+  }
+
+  .shenlun-sheet-scroll {
+    max-height: max(220px, calc(100dvh - 260px));
+    overflow: auto;
+    scrollbar-gutter: stable;
+  }
+}
+
+@page {
+  size: A4 landscape;
+  margin: 12mm;
+}
+
+@media print {
+  .app-shell__sidebar,
+  .shenlun-toolbar,
+  .shenlun-selection-action,
+  .shenlun-status,
+  .shenlun-file-import,
+  input,
+  textarea,
+  select,
+  button {
+    display: none !important;
+  }
+
+  .app-shell__main {
+    margin: 0 !important;
+    padding: 0 !important;
+  }
+
+  .shenlun-page,
+  .shenlun-sheet-scroll,
+  .shenlun-annotation-card,
+  .shenlun-note-preview {
+    display: block;
+    overflow: visible;
+  }
+
+  .shenlun-page {
+    --shenlun-cell-size: 26px;
+    print-color-adjust: exact;
+    -webkit-print-color-adjust: exact;
+  }
+
+  .shenlun-workspace {
+    display: grid;
+    grid-template-columns: max-content 260px;
+    gap: var(--space-3);
+    align-items: start;
+    width: max-content;
+  }
+
+  .shenlun-sheet {
+    display: inline-block;
+  }
+
+  .shenlun-grid {
+    display: flex;
+    flex-direction: column;
+  }
+
+  .shenlun-notes-rail {
+    display: flex;
+  }
+
+  .shenlun-standard-answer__print {
+    display: block;
+  }
+
+  .shenlun-title-print {
+    display: block;
+  }
+
+  .shenlun-annotation-list {
+    display: grid;
+  }
+
+  .shenlun-connectors,
+  svg {
+    display: block;
+    overflow: visible;
+  }
+
+  .shenlun-grid {
+    width: max-content;
+    min-width: max-content;
+  }
+
+  .shenlun-notes-rail {
+    max-height: none;
+    border-color: var(--color-border-strong);
+  }
+
+  .shenlun-note-link {
+    color: inherit;
+    text-decoration: underline;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .shenlun-page,
+  .shenlun-page *,
+  .shenlun-page *::before,
+  .shenlun-page *::after {
+    animation: none !important;
+    scroll-behavior: auto !important;
+    transition: none !important;
+  }
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  .shenlun-page,
+  .shenlun-notes-rail,
+  .shenlun-standard-answer,
+  .shenlun-note-editor,
+  .shenlun-note-preview,
+  .shenlun-annotation-list,
+  .shenlun-annotation-card {
+    backdrop-filter: none !important;
+    background-color: var(--color-surface) !important;
+  }
+}
+
+@media (prefers-contrast: more) {
+  .shenlun-page,
+  .shenlun-notes-rail,
+  .shenlun-standard-answer,
+  .shenlun-note-editor,
+  .shenlun-note-preview,
+  .shenlun-annotation-list,
+  .shenlun-annotation-card,
+  .shenlun-grid,
+  .shenlun-cell {
+    border-color: var(--color-border-strong);
+  }
+
+  .shenlun-note-link {
+    color: var(--color-ink);
+  }
+}

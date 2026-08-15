@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import type { Mastery, StudySessionInput } from '../../shared/contracts';
 import { createApp } from '../../server/app';
 import { scheduleNext } from '../../server/study/scheduler';
-import { createStudyService } from '../../server/study/service';
+import { calculateStudyCardWeight, createStudyService } from '../../server/study/service';
 import { createTestDatabase } from '../helpers/testDatabase';
 
 const fixedNow = new Date('2026-07-17T10:00:00.000Z');
@@ -125,6 +125,30 @@ function sessionInput(overrides: Partial<StudySessionInput> = {}): StudySessionI
   };
 }
 
+function insertGoodReviews(
+  database: TestDatabase,
+  cardId: string,
+  quizItemId: string,
+  count: number,
+) {
+  const insert = database.db.prepare(`
+    INSERT INTO review_logs (
+      id, quiz_item_id, card_id, rating, previous_due_at, next_due_at, reviewed_at
+    ) VALUES (?, ?, ?, 'good', ?, ?, ?)
+  `);
+  for (let index = 0; index < count; index += 1) {
+    const reviewedAt = new Date(fixedNow.getTime() - (index + 1) * 86_400_000).toISOString();
+    insert.run(
+      `review-good-${cardId}-${index}`,
+      quizItemId,
+      cardId,
+      reviewedAt,
+      reviewedAt,
+      reviewedAt,
+    );
+  }
+}
+
 describe('混合卡组与题面复习', () => {
   const resources: TestDatabase[] = [];
 
@@ -143,6 +167,86 @@ describe('混合卡组与题面复习', () => {
     const app = createApp({ studyService: service });
     return { app, database, service };
   }
+
+  it('按不会、熟练与距上次抽取时间计算卡片权重并锁定下限', () => {
+    const nowIso = fixedNow.toISOString();
+
+    expect(calculateStudyCardWeight({
+      wrongCount: 0,
+      knownCount: 0,
+      lastDrawnAt: null,
+    }, nowIso)).toBe(2);
+    expect(calculateStudyCardWeight({
+      wrongCount: 0,
+      knownCount: 0,
+      lastDrawnAt: nowIso,
+    }, nowIso)).toBe(0.5);
+    expect(calculateStudyCardWeight({
+      wrongCount: 0,
+      knownCount: 0,
+      lastDrawnAt: '2026-07-03T10:00:00.000Z',
+    }, nowIso)).toBe(1.5);
+    expect(calculateStudyCardWeight({
+      wrongCount: 0,
+      knownCount: 0,
+      lastDrawnAt: '2026-06-26T10:00:00.000Z',
+    }, nowIso)).toBe(2);
+    expect(calculateStudyCardWeight({
+      wrongCount: 3,
+      knownCount: 1,
+      lastDrawnAt: null,
+    }, nowIso)).toBe(4);
+    expect(calculateStudyCardWeight({
+      wrongCount: 0,
+      knownCount: 20,
+      lastDrawnAt: nowIso,
+    }, nowIso)).toBe(0.25);
+  });
+
+  it('随机模式汇总会了日志降低熟练卡权重', () => {
+    const { database, service } = setup(() => 0.3);
+    insertCard(database, {
+      id: 'mastered',
+      quizItems: [{ id: 'mastered-a' }],
+    });
+    insertCard(database, {
+      id: 'new',
+      quizItems: [{ id: 'new-a' }],
+    });
+    insertGoodReviews(database, 'mastered', 'mastered-a', 3);
+
+    const result = service.createSession(sessionInput({ count: 1, order: 'random' }));
+
+    expect(result.items.map(({ quizItemId }) => quizItemId)).toEqual(['new-a']);
+  });
+
+  it('创建会话后只更新实际抽中卡片的上次抽取时间', () => {
+    const { database, service } = setup(() => 0);
+    insertCard(database, { id: 'drawn', quizItems: [{ id: 'drawn-a' }] });
+    insertCard(database, { id: 'untouched', quizItems: [{ id: 'untouched-a' }] });
+
+    const result = service.createSession(sessionInput({ count: 1, order: 'random' }));
+    const timestamps = database.db
+      .prepare('SELECT id, last_drawn_at FROM cards ORDER BY id')
+      .all() as Array<{ id: string; last_drawn_at: string | null }>;
+
+    expect(result.items.map(({ cardId }) => cardId).sort()).toEqual(['drawn']);
+    expect(timestamps).toEqual([
+      { id: 'drawn', last_drawn_at: fixedNow.toISOString() },
+      { id: 'untouched', last_drawn_at: null },
+    ]);
+  });
+
+  it('题面组装失败时不记录本次抽取时间', () => {
+    const { database, service } = setup(() => 0);
+    insertCard(database, { id: 'drawn', quizItems: [{ id: 'drawn-a' }] });
+    database.db.exec('DROP TABLE card_categories');
+
+    expect(() => service.createSession(sessionInput({ count: 1, order: 'random' }))).toThrow();
+    expect(
+      database.db.prepare("SELECT last_drawn_at FROM cards WHERE id = 'drawn'").get(),
+    ).toEqual({ last_drawn_at: null });
+  });
 
   it('固定模式严格按卡片创建时间、题面创建时间和题面编号升序', () => {
     const { database, service } = setup();
@@ -215,6 +319,22 @@ describe('混合卡组与题面复习', () => {
 
     expect(ids).toEqual(['high-a', 'high-b', 'low-a']);
     expect(new Set(ids).size).toBe(ids.length);
+  });
+
+  it('同卡多个题面均分卡片总权重而不放大抽中概率', () => {
+    const { database, service } = setup(() => 0.6);
+    insertCard(database, {
+      id: 'multi',
+      quizItems: [{ id: 'multi-a' }, { id: 'multi-b' }],
+    });
+    insertCard(database, {
+      id: 'single',
+      quizItems: [{ id: 'single-a' }],
+    });
+
+    const result = service.createSession(sessionInput({ count: 1, order: 'random' }));
+
+    expect(result.items.map(({ quizItemId }) => quizItemId)).toEqual(['single-a']);
   });
 
   it('排除归档、非 ready 和无题面的卡片，同时把正反题面作为独立候选', () => {

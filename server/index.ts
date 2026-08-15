@@ -13,6 +13,13 @@ import { createBackupService } from './backups/service';
 import { createQqMusicService } from './localApps/qqMusic';
 import { createCurrentAffairsService } from './currentAffairs/service';
 import { createReviewImageService } from './reviewImages';
+import { createKnowledgeMapService } from './knowledgeMaps/service';
+import { createDailyAnkiService } from './anki/daily';
+import { createAnkiRouter } from './anki/routes';
+import { sendAnkiBundle } from './anki/sender';
+import { createAnkiLibraryExportService } from './anki/libraryExports';
+import { createAnkiAutoSendService } from './anki/autoSend';
+import { createShenlunReviewService } from './shenlunReviews';
 
 const config = readConfig();
 mkdirSync(config.dataDir, { recursive: true });
@@ -41,6 +48,25 @@ const currentAffairsService = createCurrentAffairsService();
 const reviewImageService = createReviewImageService({
   directory: resolve(config.dataDir, 'review-images'),
 });
+const knowledgeMapService = createKnowledgeMapService({ database: databaseManager });
+const dailyAnkiService = createDailyAnkiService({
+  database: databaseManager,
+  outputDirectory: config.anki.outputDirectory,
+  sender: (input) => sendAnkiBundle({
+    ...input,
+    command: config.anki.ccConnectCommand,
+    dataDirectory: config.anki.ccConnectDataDirectory,
+  }),
+});
+const ankiLibraryExportService = createAnkiLibraryExportService({
+  database: databaseManager,
+  outputDirectory: config.anki.outputDirectory,
+});
+const ankiAutoSendService = createAnkiAutoSendService({
+  database: databaseManager,
+  dailyService: dailyAnkiService,
+});
+const shenlunReviewService = createShenlunReviewService({ database: databaseManager });
 const app = createApp({
   cardService,
   studyService,
@@ -55,13 +81,23 @@ const app = createApp({
   localApps: { database: databaseManager, qqMusicService },
   currentAffairsService,
   reviewImageService,
+  knowledgeMapService,
+  shenlunReviewService,
+  ankiRouter: createAnkiRouter(dailyAnkiService, ankiLibraryExportService),
 });
 
-app.listen(config.port, '127.0.0.1', () => {
-  console.log(`Server listening on http://127.0.0.1:${config.port}`);
+app.listen(config.port, config.host, () => {
+  console.log(`Server listening on http://${config.host}:${config.port}`);
   if (hasConfiguredDeepSeekApiKey(config.deepseek.apiKey)) {
     void cardService.retryPendingBatch(20).catch(() => {
       console.error('启动后的待整理卡片重试失败');
     });
   }
+  void ankiAutoSendService.check().then((result) => {
+    if (result.status === 'send_failed') {
+      console.error('启动后的 Anki 自动发送未完成');
+    }
+  }).catch(() => {
+    console.error('启动后的 Anki 自动发送检查失败');
+  });
 });

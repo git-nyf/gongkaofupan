@@ -16,9 +16,13 @@ const expectedTables = [
   'card_tags',
   'cards',
   'categories',
+  'knowledge_map_edges',
+  'knowledge_map_nodes',
+  'knowledge_maps',
   'quiz_items',
   'review_logs',
   'schema_migrations',
+  'shenlun_reviews',
   'tags',
 ];
 
@@ -39,16 +43,26 @@ describe('数据库初始化', () => {
     const indexes = testDatabase.db
       .prepare("SELECT name FROM sqlite_master WHERE type = 'index' AND name LIKE 'idx_%' ORDER BY name")
       .all() as Array<{ name: string }>;
+    const lastDrawnAtIndexColumns = testDatabase.db
+      .prepare("SELECT name FROM pragma_index_info('idx_cards_last_drawn_at') ORDER BY seqno")
+      .all() as Array<{ name: string }>;
 
     expect(tables.map(({ name }) => name)).toEqual(expectedTables);
     expect(indexes.map(({ name }) => name)).toEqual([
       'idx_card_folder_items_card_id',
       'idx_cards_ai_status',
       'idx_cards_archived',
+      'idx_cards_last_drawn_at',
+      'idx_knowledge_map_edges_map_id',
+      'idx_knowledge_map_nodes_card_id',
+      'idx_knowledge_map_nodes_map_id',
       'idx_quiz_items_created_at',
       'idx_quiz_items_due_at',
       'idx_review_logs_card_id',
+      'idx_shenlun_reviews_archive_order',
+      'idx_shenlun_reviews_updated_at',
     ]);
+    expect(lastDrawnAtIndexColumns).toEqual([{ name: 'last_drawn_at' }]);
   });
 
   it('写入完整且编号确定的公考分类目录', () => {
@@ -76,7 +90,7 @@ describe('数据库初始化', () => {
     ]);
   });
 
-  it('全新数据库按顺序迁移到版本 5 并提供模板与手动排序默认值', () => {
+  it('全新数据库按顺序迁移到版本 10 并提供模板与手动排序默认值', () => {
     const testDatabase = createTestDatabase();
     opened.push(testDatabase);
 
@@ -89,6 +103,11 @@ describe('数据库初始化', () => {
     const manualOrderColumn = testDatabase.db
       .prepare(
         "SELECT name, type, [notnull], dflt_value FROM pragma_table_info('cards') WHERE name = 'manual_order'",
+      )
+      .get();
+    const lastDrawnAtColumn = testDatabase.db
+      .prepare(
+        "SELECT name, type, [notnull], dflt_value FROM pragma_table_info('cards') WHERE name = 'last_drawn_at'",
       )
       .get();
 
@@ -105,16 +124,22 @@ describe('数据库初始化', () => {
       { version: 3 },
       { version: 4 },
       { version: 5 },
+      { version: 6 },
+      { version: 7 },
+      { version: 8 },
+      { version: 9 },
+      { version: 10 },
     ]);
     expect(templateColumn).toEqual({ name: 'template', type: 'TEXT', notnull: 1, dflt_value: "''" });
     expect(manualOrderColumn).toEqual({ name: 'manual_order', type: 'INTEGER', notnull: 1, dflt_value: '0' });
+    expect(lastDrawnAtColumn).toEqual({ name: 'last_drawn_at', type: 'TEXT', notnull: 0, dflt_value: null });
     expect(testDatabase.db.prepare("SELECT template, manual_order FROM cards WHERE id = 'default-template'").get()).toEqual({
       template: '',
       manual_order: 0,
     });
   });
 
-  it('从版本 1 升级到版本 5 时保留原卡片', () => {
+  it('从版本 1 升级到版本 10 时保留原卡片', () => {
     const database = new Database(':memory:');
     try {
       database.exec(readFileSync(resolve(process.cwd(), 'server/db/migrations/001_initial.sql'), 'utf8'));
@@ -141,6 +166,11 @@ describe('数据库初始化', () => {
         { version: 3 },
         { version: 4 },
         { version: 5 },
+        { version: 6 },
+        { version: 7 },
+        { version: 8 },
+        { version: 9 },
+        { version: 10 },
       ]);
     } finally {
       database.close();
@@ -198,6 +228,11 @@ describe('数据库初始化', () => {
         { version: 3 },
         { version: 4 },
         { version: 5 },
+        { version: 6 },
+        { version: 7 },
+        { version: 8 },
+        { version: 9 },
+        { version: 10 },
       ]);
       expect(
         database
@@ -246,6 +281,11 @@ describe('数据库初始化', () => {
         { version: 3 },
         { version: 4 },
         { version: 5 },
+        { version: 6 },
+        { version: 7 },
+        { version: 8 },
+        { version: 9 },
+        { version: 10 },
       ]);
     } finally {
       database.close();
@@ -273,7 +313,158 @@ describe('数据库初始化', () => {
       { version: 3 },
       { version: 4 },
       { version: 5 },
+      { version: 6 },
+      { version: 7 },
+      { version: 8 },
+      { version: 9 },
+      { version: 10 },
     ]);
+  });
+
+  it('知识图谱节点支持自定义内容、层级和卡片节点唯一约束', () => {
+    const testDatabase = createTestDatabase();
+    opened.push(testDatabase);
+
+    testDatabase.db
+      .prepare(`
+        INSERT INTO cards (id, entry_mode, raw_input, ai_status, created_at, updated_at)
+        VALUES ('map-card', 'knowledge', '卡片节点', 'ready', '2026-08-01T00:00:00.000Z', '2026-08-01T00:00:00.000Z')
+      `)
+      .run();
+    testDatabase.db
+      .prepare(`
+        INSERT INTO knowledge_maps (id, name, created_at, updated_at)
+        VALUES ('map-1', '迁移校验图谱', '2026-08-01T00:00:00.000Z', '2026-08-01T00:00:00.000Z')
+      `)
+      .run();
+
+    const columns = testDatabase.db
+      .prepare(`
+        SELECT name, type, [notnull], dflt_value
+        FROM pragma_table_info('knowledge_map_nodes')
+        WHERE name IN ('card_id', 'title', 'content', 'level')
+        ORDER BY name
+      `)
+      .all();
+    expect(columns).toEqual([
+      { name: 'card_id', type: 'TEXT', notnull: 0, dflt_value: null },
+      { name: 'content', type: 'TEXT', notnull: 1, dflt_value: "''" },
+      { name: 'level', type: 'INTEGER', notnull: 1, dflt_value: '1' },
+      { name: 'title', type: 'TEXT', notnull: 1, dflt_value: "''" },
+    ]);
+
+    const insertNode = testDatabase.db.prepare(`
+      INSERT INTO knowledge_map_nodes (
+        id, map_id, card_id, title, content, level, x, y, z, created_at, updated_at
+      ) VALUES (?, 'map-1', ?, ?, ?, ?, 0, 0, 0, '2026-08-01T00:00:00.000Z', '2026-08-01T00:00:00.000Z')
+    `);
+    insertNode.run('card-node', 'map-card', '', '', 2);
+    expect(() => insertNode.run('duplicate-card-node', 'map-card', '', '', 2)).toThrow();
+    insertNode.run('custom-node-a', null, '自定义节点', '补充说明', 3);
+    insertNode.run('custom-node-b', null, '自定义节点', '补充说明', 3);
+    expect(() => insertNode.run('invalid-level-node', null, '非法层级', '', 0)).toThrow();
+
+    expect(
+      testDatabase.db
+        .prepare('SELECT card_id, title, content, level FROM knowledge_map_nodes ORDER BY id')
+        .all(),
+    ).toEqual([
+      { card_id: 'map-card', title: '', content: '', level: 2 },
+      { card_id: null, title: '自定义节点', content: '补充说明', level: 3 },
+      { card_id: null, title: '自定义节点', content: '补充说明', level: 3 },
+    ]);
+  });
+
+  it('从版本 6 升级到版本 7 时保留已有图谱节点和关系', () => {
+    const database = new Database(':memory:');
+    try {
+      database.pragma('foreign_keys = ON');
+      for (const migration of [
+        '001_initial.sql',
+        '002_card_template.sql',
+        '003_distinct_split_card_titles.sql',
+        '004_card_manual_order.sql',
+        '005_card_folders.sql',
+        '006_knowledge_maps.sql',
+      ]) {
+        database.exec(readFileSync(resolve(process.cwd(), 'server', 'db', 'migrations', migration), 'utf8'));
+      }
+      for (const version of [1, 2, 3, 4, 5, 6]) {
+        database
+          .prepare('INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)')
+          .run(version, '2026-08-01T00:00:00.000Z');
+      }
+      database
+        .prepare(`
+          INSERT INTO cards (id, entry_mode, raw_input, ai_status, created_at, updated_at)
+          VALUES (?, 'knowledge', ?, 'ready', '2026-08-01T00:00:00.000Z', '2026-08-01T00:00:00.000Z')
+        `)
+        .run('legacy-card-a', '旧节点 A');
+      database
+        .prepare(`
+          INSERT INTO cards (id, entry_mode, raw_input, ai_status, created_at, updated_at)
+          VALUES (?, 'knowledge', ?, 'ready', '2026-08-01T00:00:00.000Z', '2026-08-01T00:00:00.000Z')
+        `)
+        .run('legacy-card-b', '旧节点 B');
+      database
+        .prepare(`
+          INSERT INTO knowledge_maps (id, name, created_at, updated_at)
+          VALUES ('legacy-map', '旧图谱', '2026-08-01T00:00:00.000Z', '2026-08-01T00:00:00.000Z')
+        `)
+        .run();
+      database
+        .prepare(`
+          INSERT INTO knowledge_map_nodes (id, map_id, card_id, x, y, z, created_at, updated_at)
+          VALUES (?, 'legacy-map', ?, ?, ?, ?, '2026-08-01T00:00:00.000Z', '2026-08-01T00:00:00.000Z')
+        `)
+        .run('legacy-node-a', 'legacy-card-a', 1, 2, 3);
+      database
+        .prepare(`
+          INSERT INTO knowledge_map_nodes (id, map_id, card_id, x, y, z, created_at, updated_at)
+          VALUES (?, 'legacy-map', ?, ?, ?, ?, '2026-08-01T00:00:00.000Z', '2026-08-01T00:00:00.000Z')
+        `)
+        .run('legacy-node-b', 'legacy-card-b', 4, 5, 6);
+      database
+        .prepare(`
+          INSERT INTO knowledge_map_edges (
+            id, map_id, source_node_id, target_node_id, label, created_at, updated_at
+          ) VALUES (
+            'legacy-edge', 'legacy-map', 'legacy-node-a', 'legacy-node-b', '旧关系',
+            '2026-08-01T00:00:00.000Z', '2026-08-01T00:00:00.000Z'
+          )
+        `)
+        .run();
+
+      migrate(database);
+
+      expect(database.prepare('SELECT version FROM schema_migrations ORDER BY version').all()).toEqual([
+        { version: 1 },
+        { version: 2 },
+        { version: 3 },
+        { version: 4 },
+        { version: 5 },
+        { version: 6 },
+        { version: 7 },
+        { version: 8 },
+        { version: 9 },
+        { version: 10 },
+      ]);
+      expect(
+        database
+          .prepare('SELECT id, card_id, title, content, level, x, y, z FROM knowledge_map_nodes ORDER BY id')
+          .all(),
+      ).toEqual([
+        { id: 'legacy-node-a', card_id: 'legacy-card-a', title: '', content: '', level: 2, x: 1, y: 2, z: 3 },
+        { id: 'legacy-node-b', card_id: 'legacy-card-b', title: '', content: '', level: 2, x: 4, y: 5, z: 6 },
+      ]);
+      expect(database.prepare('SELECT source_node_id, target_node_id, label FROM knowledge_map_edges').get()).toEqual({
+        source_node_id: 'legacy-node-a',
+        target_node_id: 'legacy-node-b',
+        label: '旧关系',
+      });
+    } finally {
+      database.close();
+    }
   });
 
   it('每次连接启用 WAL 和外键约束', () => {
@@ -356,7 +547,7 @@ describe('数据库初始化', () => {
       .get() as { count: number };
 
     expect(categoryCount.count).toBe(69);
-    expect(migrationCount.count).toBe(5);
+    expect(migrationCount.count).toBe(10);
   });
 
   it('拒绝损坏替换源并保持原数据库可用且能够再次替换', () => {

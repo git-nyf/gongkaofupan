@@ -1,14 +1,17 @@
 import { spawn } from 'node:child_process';
+import { existsSync } from 'node:fs';
 import path from 'node:path';
 
 const DEFAULT_COMMAND = 'cc-connect';
 const DEFAULT_TIMEOUT_MS = 30_000;
+const FORCE_KILL_GRACE_MS = 1_000;
 
 export interface SendAnkiBundleInput {
   apkgPath: string;
   markdownPath: string;
   message?: string;
   command?: string;
+  dataDirectory?: string;
   timeoutMs?: number;
 }
 
@@ -41,6 +44,39 @@ export interface SendAnkiBundleFailure {
 }
 
 export type SendAnkiBundleResult = SendAnkiBundleSuccess | SendAnkiBundleFailure;
+
+export interface ResolveCcConnectLaunchOptions {
+  platform?: NodeJS.Platform;
+  appData?: string;
+  fileExists?: (filePath: string) => boolean;
+}
+
+export interface CcConnectLaunch {
+  command: string;
+  argsPrefix: string[];
+}
+
+export function resolveCcConnectLaunch(
+  command: string,
+  {
+    platform = process.platform,
+    appData = process.env.APPDATA,
+    fileExists = existsSync,
+  }: ResolveCcConnectLaunchOptions = {},
+): CcConnectLaunch {
+  if (platform === 'win32' && command.toLowerCase() === DEFAULT_COMMAND && appData) {
+    const binaryPath = path.win32.join(
+      appData,
+      'npm',
+      'node_modules',
+      'cc-connect',
+      'bin',
+      'cc-connect.exe',
+    );
+    if (fileExists(binaryPath)) return { command: binaryPath, argsPrefix: [] };
+  }
+  return { command, argsPrefix: [] };
+}
 
 /** 通过 cc-connect 将 Anki 包和中间 Markdown 文档发送到当前会话。 */
 export function sendAnkiBundle(input: SendAnkiBundleInput): Promise<SendAnkiBundleResult> {
@@ -78,8 +114,12 @@ export function sendAnkiBundle(input: SendAnkiBundleInput): Promise<SendAnkiBund
 }
 
 function createArguments(input: SendAnkiBundleInput): string[] {
+  const dataDirectory = typeof input?.dataDirectory === 'string' && input.dataDirectory.trim()
+    ? path.resolve(input.dataDirectory)
+    : '';
   const args = [
     'send',
+    ...(dataDirectory ? ['--data-dir', dataDirectory] : []),
     '--file',
     toAbsolutePath(input?.apkgPath),
     '--file',
@@ -105,6 +145,13 @@ function validateInput(input: SendAnkiBundleInput): string | null {
   if (input.command !== undefined && (typeof input.command !== 'string' || !input.command.trim())) {
     return 'command 不能为空';
   }
+  if (input.dataDirectory !== undefined && (
+    typeof input.dataDirectory !== 'string'
+    || !input.dataDirectory.trim()
+    || !path.isAbsolute(input.dataDirectory)
+  )) {
+    return 'dataDirectory 必须是绝对路径';
+  }
   return null;
 }
 
@@ -114,27 +161,45 @@ function runCommand(
   timeoutMs: number,
 ): Promise<SendAnkiBundleResult> {
   return new Promise((resolve) => {
+    const launch = resolveCcConnectLaunch(command);
+    const spawnArgs = [...launch.argsPrefix, ...args];
     let child: ReturnType<typeof spawn>;
     try {
-      child = spawn(command, args, {
+      child = spawn(launch.command, spawnArgs, {
         shell: false,
         windowsHide: true,
         stdio: ['ignore', 'pipe', 'pipe'],
       });
     } catch (error) {
-      resolve(createFailure('SPAWN_ERROR', errorMessage(error), command, args));
+      resolve(createFailure('SPAWN_ERROR', errorMessage(error), launch.command, spawnArgs));
       return;
     }
 
     let stdout = '';
     let stderr = '';
     let settled = false;
+    let timedOut = false;
     let timer: ReturnType<typeof setTimeout> | undefined;
+    let forceKillTimer: ReturnType<typeof setTimeout> | undefined;
+    let timeoutFinishTimer: ReturnType<typeof setTimeout> | undefined;
+
+    const timeoutFailure = (): SendAnkiBundleFailure => ({
+      ...createFailure(
+        'TIMEOUT',
+        `发送操作超过 ${timeoutMs} 毫秒`,
+        launch.command,
+        spawnArgs,
+      ),
+      stdout,
+      stderr,
+    });
 
     const finish = (result: SendAnkiBundleResult) => {
       if (settled) return;
       settled = true;
       if (timer) clearTimeout(timer);
+      if (forceKillTimer) clearTimeout(forceKillTimer);
+      if (timeoutFinishTimer) clearTimeout(timeoutFinishTimer);
       resolve(result);
     };
 
@@ -145,19 +210,27 @@ function runCommand(
       stderr += chunk.toString();
     });
     child.once('error', (error: Error & { code?: string }) => {
+      if (timedOut) {
+        finish(timeoutFailure());
+        return;
+      }
       const code = error.code === 'ENOENT' ? 'COMMAND_NOT_FOUND' : 'SPAWN_ERROR';
       finish({
-        ...createFailure(code, errorMessage(error), command, args),
+        ...createFailure(code, errorMessage(error), launch.command, spawnArgs),
         stdout,
         stderr,
       });
     });
     child.once('close', (exitCode: number | null, signal: NodeJS.Signals | null) => {
+      if (timedOut) {
+        finish({ ...timeoutFailure(), exitCode, signal });
+        return;
+      }
       if (exitCode === 0) {
         finish({
           ok: true,
-          command,
-          args,
+          command: launch.command,
+          args: spawnArgs,
           stdout,
           stderr,
           exitCode: 0,
@@ -167,8 +240,8 @@ function runCommand(
           ...createFailure(
             'COMMAND_FAILED',
             `cc-connect 退出状态 ${exitCode ?? '未知'}${signal ? `（信号 ${signal}）` : ''}`,
-            command,
-            args,
+            launch.command,
+            spawnArgs,
           ),
           stdout,
           stderr,
@@ -181,16 +254,26 @@ function runCommand(
     if (timeoutMs > 0) {
       timer = setTimeout(() => {
         if (settled) return;
+        timedOut = true;
         try {
           child.kill('SIGTERM');
         } catch {
-          // 子进程已经退出时，超时结果仍然是最有用的状态。
+          finish(timeoutFailure());
+          return;
         }
-        finish({
-          ...createFailure('TIMEOUT', `发送操作超过 ${timeoutMs} 毫秒`, command, args),
-          stdout,
-          stderr,
-        });
+        forceKillTimer = setTimeout(() => {
+          if (settled) return;
+          try {
+            child.kill('SIGKILL');
+          } catch {
+            finish(timeoutFailure());
+            return;
+          }
+          timeoutFinishTimer = setTimeout(
+            () => finish(timeoutFailure()),
+            FORCE_KILL_GRACE_MS,
+          );
+        }, FORCE_KILL_GRACE_MS);
       }, timeoutMs);
     }
   });

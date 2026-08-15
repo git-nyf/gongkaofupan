@@ -2,8 +2,10 @@ import { useEffect, useLayoutEffect, useState, type ReactNode } from 'react';
 import {
   BookOpenCheck,
   ChartNoAxesColumnIncreasing,
+  FilePenLine,
   Library,
   LayoutDashboard,
+  Network,
   PanelLeftClose,
   PanelLeftOpen,
   Settings,
@@ -31,6 +33,8 @@ const navigationItems: NavigationItem[] = [
   { label: '背诵', path: '/study', icon: BookOpenCheck },
   { label: '卡片库', path: '/cards', icon: Library },
   { label: '复盘', path: '/review', icon: ChartNoAxesColumnIncreasing },
+  { label: '申论', path: '/shenlun', icon: FilePenLine },
+  { label: '图谱', path: '/graphs', icon: Network },
   { label: '设置', path: '/settings', icon: Settings },
 ];
 

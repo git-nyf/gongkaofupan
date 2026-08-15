@@ -89,7 +89,96 @@ export function migrate(database: Database.Database) {
       database.exec(readFileSync(cardFoldersPath, 'utf8'));
       recordMigration.run(5, new Date().toISOString());
     }
+
+    if (!appliedVersions.has(6)) {
+      const knowledgeMapsPath = resolve(
+        process.cwd(),
+        'server',
+        'db',
+        'migrations',
+        '006_knowledge_maps.sql',
+      );
+      database.exec(readFileSync(knowledgeMapsPath, 'utf8'));
+      recordMigration.run(6, new Date().toISOString());
+    }
+
+    if (!appliedVersions.has(7)) {
+      const customKnowledgeMapNodesPath = resolve(
+        process.cwd(),
+        'server',
+        'db',
+        'migrations',
+        '007_knowledge_map_custom_nodes.sql',
+      );
+      database.exec(readFileSync(customKnowledgeMapNodesPath, 'utf8'));
+      recordMigration.run(7, new Date().toISOString());
+    }
+
+    if (!appliedVersions.has(8)) {
+      const shenlunReviewsPath = resolve(
+        process.cwd(),
+        'server',
+        'db',
+        'migrations',
+        '008_shenlun_reviews.sql',
+      );
+      database.exec(readFileSync(shenlunReviewsPath, 'utf8'));
+      recordMigration.run(8, new Date().toISOString());
+    }
+
+    if (!appliedVersions.has(9)) {
+      const shenlunReviewLibraryStatePath = resolve(
+        process.cwd(),
+        'server',
+        'db',
+        'migrations',
+        '009_shenlun_review_library_state.sql',
+      );
+      database.exec(readFileSync(shenlunReviewLibraryStatePath, 'utf8'));
+      recordMigration.run(9, new Date().toISOString());
+    }
+
+    if (!appliedVersions.has(10)) {
+      const cardLastDrawnAtPath = resolve(
+        process.cwd(),
+        'server',
+        'db',
+        'migrations',
+        '010_card_last_drawn_at.sql',
+      );
+      database.exec(readFileSync(cardLastDrawnAtPath, 'utf8'));
+      recordMigration.run(10, new Date().toISOString());
+    }
+
+    ensureKnowledgeMapCustomNodeSchema(database);
   });
 
   applyMigrations();
+}
+
+function ensureKnowledgeMapCustomNodeSchema(database: Database.Database) {
+  const columns = database.prepare('PRAGMA table_info(knowledge_map_nodes)').all() as Array<{
+    name: string;
+    notnull: number;
+  }>;
+  if (columns.length === 0) return;
+
+  const columnByName = new Map(columns.map((column) => [column.name, column]));
+  const cardIdColumn = columnByName.get('card_id');
+  const needsCustomNodeSchema =
+    !columnByName.has('title')
+    || !columnByName.has('content')
+    || !columnByName.has('level')
+    || cardIdColumn?.notnull === 1;
+
+  if (!needsCustomNodeSchema) return;
+
+  const customKnowledgeMapNodesPath = resolve(
+    process.cwd(),
+    'server',
+    'db',
+    'migrations',
+    '007_knowledge_map_custom_nodes.sql',
+  );
+  database.exec(readFileSync(customKnowledgeMapNodesPath, 'utf8'));
 }

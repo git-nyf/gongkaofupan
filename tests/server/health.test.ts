@@ -162,6 +162,7 @@ describe('Vite 开发代理', () => {
 describe('应用配置', () => {
   it('读取默认配置并限制 DeepSeek 模型', () => {
     expect(readConfig({})).toEqual({
+      host: '127.0.0.1',
       port: 8787,
       dataDir: resolve(testRoot, 'data'),
       deepseek: {
@@ -169,8 +170,22 @@ describe('应用配置', () => {
         model: 'deepseek-v4-flash',
         apiKey: '',
       },
+      anki: {
+        outputDirectory: resolve(testRoot, 'output/anki'),
+        ccConnectCommand: 'cc-connect',
+        ccConnectDataDirectory: undefined,
+      },
     });
 
     expect(() => readConfig({ DEEPSEEK_MODEL: 'other-model' })).toThrow();
+  });
+
+  it('支持通过 HOST 配置服务监听地址', () => {
+    expect(readConfig({ HOST: '0.0.0.0' }).host).toBe('0.0.0.0');
+  });
+
+  it('读取 cc-connect 数据目录配置', () => {
+    expect(readConfig({ CC_CONNECT_DATA_DIR: 'D:\\cc-connect\\cc-connect-data' }).anki.ccConnectDataDirectory)
+      .toBe(resolve('D:\\cc-connect\\cc-connect-data'));
   });
 });

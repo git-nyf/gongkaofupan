@@ -1,4 +1,4 @@
-import express from 'express';
+import express, { type Router } from 'express';
 import type { ErrorRequestHandler } from 'express';
 import { existsSync } from 'node:fs';
 import { resolve } from 'node:path';
@@ -16,6 +16,9 @@ import { createLocalAppsRouter, type LocalAppsRouterDependencies } from './local
 import { createCurrentAffairsRouter } from './currentAffairs/routes';
 import type { CurrentAffairsService } from './currentAffairs/service';
 import { createReviewImageRouter, type ReviewImageService } from './reviewImages';
+import { createKnowledgeMapRouter } from './knowledgeMaps/routes';
+import type { KnowledgeMapService } from './knowledgeMaps/service';
+import { createShenlunReviewRouter, type ShenlunReviewService } from './shenlunReviews';
 
 interface AppDependencies {
   cardService?: CardService;
@@ -27,6 +30,9 @@ interface AppDependencies {
   localApps?: LocalAppsRouterDependencies;
   currentAffairsService?: CurrentAffairsService;
   reviewImageService?: ReviewImageService;
+  knowledgeMapService?: KnowledgeMapService;
+  shenlunReviewService?: ShenlunReviewService;
+  ankiRouter?: Router;
 }
 
 export function createApp({
@@ -39,6 +45,9 @@ export function createApp({
   localApps,
   currentAffairsService,
   reviewImageService,
+  knowledgeMapService,
+  shenlunReviewService,
+  ankiRouter,
 }: AppDependencies = {}) {
   const app = express();
 
@@ -81,6 +90,18 @@ export function createApp({
 
   if (reviewImageService) {
     app.use(createReviewImageRouter(reviewImageService));
+  }
+
+  if (knowledgeMapService) {
+    app.use('/api/knowledge-maps', createKnowledgeMapRouter(knowledgeMapService));
+  }
+
+  if (shenlunReviewService) {
+    app.use('/api/shenlun-reviews', createShenlunReviewRouter(shenlunReviewService));
+  }
+
+  if (ankiRouter) {
+    app.use(ankiRouter);
   }
 
   const clientDir = resolve(process.cwd(), 'dist/client');

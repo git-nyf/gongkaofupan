@@ -33,6 +33,8 @@ interface CandidateRow {
   extension: string;
   notes: string;
   wrong_count: number;
+  known_count: number;
+  last_drawn_at: string | null;
   archived: number;
 }
 
@@ -70,10 +72,13 @@ export function createStudyService({
 }: StudyServiceDependencies): StudyService {
   return {
     createSession(input) {
+      const drawnAt = now().toISOString();
       const candidates = findCandidates(database.get(), input);
-      const selected = selectCandidates(candidates, input, now().toISOString(), random);
+      const selected = selectCandidates(candidates, input, drawnAt, random);
+      const items = toStudyItems(database.get(), selected);
+      updateLastDrawnAt(database.get(), selected, drawnAt);
       return {
-        items: toStudyItems(database.get(), selected),
+        items,
         totalAvailable: candidates.length,
       };
     },
@@ -214,6 +219,13 @@ function findCandidates(database: Database.Database, input: StudySessionInput): 
         cards.extension,
         cards.notes,
         cards.wrong_count,
+        (
+          SELECT COUNT(*)
+          FROM review_logs
+          WHERE review_logs.card_id = cards.id
+            AND review_logs.rating = 'good'
+        ) AS known_count,
+        cards.last_drawn_at,
         cards.archived
       FROM cards
       INNER JOIN quiz_items ON quiz_items.card_id = cards.id
@@ -259,30 +271,41 @@ function selectCandidates(
   random: () => number,
 ): CandidateRow[] {
   if (!input.dueFirst) {
-    const ordered = input.order === 'random' ? weightedSample(candidates, input.count, random) : candidates;
+    const ordered = input.order === 'random'
+      ? weightedSample(candidates, input.count, random, nowIso)
+      : candidates;
     return ordered.slice(0, input.count);
   }
 
   const duePool = candidates.filter((item) => item.due_at <= nowIso);
   const due = input.order === 'random'
-    ? weightedSample(duePool, input.count, random)
+    ? weightedSample(duePool, input.count, random, nowIso)
     : duePool.slice(0, input.count);
   if (due.length === input.count) return due;
   const nonDue = candidates.filter((item) => item.due_at > nowIso);
   const fill = input.order === 'random'
-    ? weightedSample(nonDue, input.count - due.length, random)
+    ? weightedSample(nonDue, input.count - due.length, random, nowIso)
     : nonDue;
   return [...due, ...fill.slice(0, input.count - due.length)];
 }
 
-function weightedSample(items: CandidateRow[], count: number, random: () => number): CandidateRow[] {
+function weightedSample(
+  items: CandidateRow[],
+  count: number,
+  random: () => number,
+  nowIso: string,
+): CandidateRow[] {
   const cardItemCounts = new Map<string, number>();
   for (const item of items) {
     cardItemCounts.set(item.card_id, (cardItemCounts.get(item.card_id) ?? 0) + 1);
   }
   const pool = items.map((item) => ({
     item,
-    weight: (1 + item.wrong_count) / (cardItemCounts.get(item.card_id) ?? 1),
+    weight: calculateStudyCardWeight({
+      wrongCount: item.wrong_count,
+      knownCount: item.known_count,
+      lastDrawnAt: item.last_drawn_at,
+    }, nowIso) / (cardItemCounts.get(item.card_id) ?? 1),
   }));
   const selected: CandidateRow[] = [];
   while (pool.length > 0 && selected.length < count) {
@@ -300,6 +323,41 @@ function weightedSample(items: CandidateRow[], count: number, random: () => numb
     selected.push(entry.item);
   }
   return selected;
+}
+
+interface StudyCardWeightInput {
+  wrongCount: number;
+  knownCount: number;
+  lastDrawnAt: string | null;
+}
+
+const DAY_MS = 86_400_000;
+const MINIMUM_CARD_WEIGHT = 0.25;
+
+export function calculateStudyCardWeight(
+  input: StudyCardWeightInput,
+  nowIso = new Date().toISOString(),
+): number {
+  const baseWeight = (1 + input.wrongCount) / (1 + input.knownCount);
+  const timeFactor = input.lastDrawnAt === null
+    ? 2
+    : Math.min(2, Math.max(0.5, 0.5 + Math.max(
+      0,
+      (new Date(nowIso).getTime() - new Date(input.lastDrawnAt).getTime()) / DAY_MS,
+    ) / 14));
+  return Math.max(MINIMUM_CARD_WEIGHT, baseWeight * timeFactor);
+}
+
+function updateLastDrawnAt(
+  database: Database.Database,
+  selected: CandidateRow[],
+  drawnAt: string,
+) {
+  const cardIds = [...new Set(selected.map(({ card_id }) => card_id))];
+  if (cardIds.length === 0) return;
+  database
+    .prepare(`UPDATE cards SET last_drawn_at = ? WHERE id IN (${cardIds.map(() => '?').join(', ')})`)
+    .run(drawnAt, ...cardIds);
 }
 
 function toStudyItems(database: Database.Database, rows: CandidateRow[]): StudyItem[] {

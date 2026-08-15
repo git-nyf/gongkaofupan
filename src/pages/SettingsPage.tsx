@@ -1,4 +1,4 @@
-import { ImagePlus, Music2, RotateCcw, Save, TimerReset } from 'lucide-react';
+import { ImagePlus, Music2, RotateCcw, Save, Send, TimerReset } from 'lucide-react';
 import {
   useEffect,
   useRef,
@@ -38,6 +38,8 @@ export function SettingsPage() {
   const [qqMusicAvailable, setQqMusicAvailable] = useState(false);
   const [musicState, setMusicState] = useState<'idle' | 'opening' | 'ready' | 'error'>('idle');
   const [musicMessage, setMusicMessage] = useState('');
+  const [ankiState, setAnkiState] = useState<'idle' | 'running' | 'ready' | 'error'>('idle');
+  const [ankiMessage, setAnkiMessage] = useState('');
 
   useEffect(() => {
     const controller = new AbortController();
@@ -121,6 +123,33 @@ export function SettingsPage() {
           ? error.message
           : 'QQ 音乐启动失败，请检查配置后重试',
       );
+    }
+  };
+
+  const generateDailyAnki = async () => {
+    if (ankiState === 'running') return;
+    setAnkiState('running');
+    setAnkiMessage('');
+    try {
+      const result = await api<{
+        status: 'generated' | 'empty';
+        count: number;
+        sent: boolean;
+      }>('/api/anki/daily', {
+        method: 'POST',
+        body: JSON.stringify({ count: 10, send: true }),
+      });
+      setAnkiState('ready');
+      setAnkiMessage(
+        result.status === 'empty'
+          ? '暂无可生成的用户初始稿'
+          : result.sent
+            ? `今日 ${result.count} 张 Anki 复习卡已发送`
+            : `今日 ${result.count} 张 Anki 复习卡已生成，cc-connect 尚未完成发送`,
+      );
+    } catch {
+      setAnkiState('error');
+      setAnkiMessage('今日 Anki 复习卡生成失败，请稍后重试');
     }
   };
 
@@ -296,6 +325,35 @@ export function SettingsPage() {
         {experienceMessage ? (
           <div className="settings-page__message" role={experienceState === 'error' ? 'alert' : 'status'}>
             {experienceMessage}
+          </div>
+        ) : null}
+      </section>
+
+      <section
+        className="settings-section liquid-glass liquid-glass--regular"
+        aria-labelledby="anki-settings-title"
+      >
+        <div className="settings-section__heading">
+          <div>
+            <h2 id="anki-settings-title">每日 Anki 复习卡</h2>
+            <p>随机抽取 10 张用户初始稿，生成 Markdown 与 Anki 卡组并通过 cc-connect 发送。</p>
+          </div>
+          <Send aria-hidden="true" size={22} />
+        </div>
+        <div className="experience-settings__actions">
+          <button
+            className="button button--primary liquid-pressable"
+            disabled={ankiState === 'running'}
+            onClick={() => void generateDailyAnki()}
+            type="button"
+          >
+            <Send aria-hidden="true" size={17} />
+            {ankiState === 'running' ? '正在生成' : '生成并发送今日 Anki'}
+          </button>
+        </div>
+        {ankiMessage ? (
+          <div className="settings-page__message" role={ankiState === 'error' ? 'alert' : 'status'}>
+            {ankiMessage}
           </div>
         ) : null}
       </section>

@@ -6,14 +6,18 @@ import {
   ArrowUpToLine,
   ChevronLeft,
   ChevronRight,
+  CircleAlert,
+  CircleCheck,
   Download,
   Eye,
   FolderCheck,
   FolderPlus,
+  History,
   LoaderCircle,
   Pencil,
   RefreshCw,
   Search,
+  Send,
   Trash2,
   X,
 } from 'lucide-react';
@@ -28,7 +32,7 @@ import type {
   CardFolderSummary,
   CardSearchResult,
 } from '../../shared/contracts';
-import { api, apiBlob } from '../api/client';
+import { api, apiBlob, ApiError } from '../api/client';
 import {
   CARD_GROUP_DRAG_TYPE,
   CardFolderShelf,
@@ -37,6 +41,7 @@ import {
 import { MathText } from '../components/MathText';
 import { RichTextPreview } from '../components/RichTextPreview';
 import { StatusNotice } from '../components/StatusNotice';
+import { ShenlunReviewLibrary } from '../components/ShenlunReviewLibrary';
 import {
   criticalSpring,
   momentumSpring,
@@ -65,6 +70,33 @@ interface FilterState {
   pageSize: number;
 }
 
+interface AnkiExportSummary {
+  id: string;
+  createdAt: string;
+  count: number;
+  apkgFileName: string;
+  markdownFileName: string;
+}
+
+interface AnkiExportDetail extends AnkiExportSummary {
+  cards: Array<{
+    id: string;
+    category: string;
+    question: string;
+    answer: string;
+  }>;
+}
+
+interface AnkiCardSendResult {
+  status: 'sent';
+  count: number;
+  cardId: string;
+}
+
+type AnkiExportResult =
+  | { status: 'created'; export: AnkiExportSummary }
+  | { status: 'empty' };
+
 const aiStatusLabels: Record<AiStatus, string> = {
   processing: '整理中',
   ready: '已整理',
@@ -74,12 +106,44 @@ const aiStatusLabels: Record<AiStatus, string> = {
 
 export function CardsPage() {
   const [searchParams, setSearchParams] = useSearchParams();
+  const isShenlunLibrary = searchParams.get('contentVersion') === 'shenlun';
+
+  if (!isShenlunLibrary) return <CardContentLibraryPage />;
+
+  const selectVersion = (version: CardContentVersion | 'shenlun') => {
+    const next = new URLSearchParams();
+    next.set('contentVersion', version);
+    setSearchParams(next);
+  };
+
+  return (
+    <section className="page cards-page">
+      <header className="page__header cards-page__header">
+        <div>
+          <span className="page__eyebrow">REVIEW LIBRARY</span>
+          <h1 className="page__title">卡片库</h1>
+          <span className="cards-page__count">申论复盘</span>
+        </div>
+      </header>
+      <div aria-label="内容版本" className="cards-content-version liquid-glass liquid-glass--thin" role="group">
+        <button aria-pressed="false" className="liquid-pressable" onClick={() => selectVersion('optimized')} type="button">AI 优化稿</button>
+        <button aria-pressed="false" className="liquid-pressable" onClick={() => selectVersion('original')} type="button">用户初始稿</button>
+        <button aria-pressed="true" className="liquid-pressable is-selected" onClick={() => selectVersion('shenlun')} type="button">申论复盘</button>
+      </div>
+      <ShenlunReviewLibrary />
+    </section>
+  );
+}
+
+function CardContentLibraryPage() {
+  const [searchParams, setSearchParams] = useSearchParams();
   const hasDeprecatedFilters = searchParams.has('rating') || searchParams.has('mastery');
   const filters = useMemo(() => readFilters(searchParams), [searchParams]);
   const [queryDraft, setQueryDraft] = useState(filters.query);
   const contentVersion = filters.contentVersion;
   const [result, setResult] = useState<CardSearchResult>();
   const [loadState, setLoadState] = useState<LoadState>('loading');
+  const [pageDraft, setPageDraft] = useState(String(filters.page));
   const [folders, setFolders] = useState<CardFolderSummary[]>([]);
   const [folderListState, setFolderListState] = useState<LoadState>('loading');
   const [folderListError, setFolderListError] = useState('');
@@ -96,6 +160,13 @@ export function CardsPage() {
   const [actionError, setActionError] = useState('');
   const [exporting, setExporting] = useState(false);
   const [exportError, setExportError] = useState('');
+  const [ankiExporting, setAnkiExporting] = useState(false);
+  const [ankiExportNotice, setAnkiExportNotice] = useState('');
+  const [ankiExportError, setAnkiExportError] = useState('');
+  const [ankiSendingCardId, setAnkiSendingCardId] = useState('');
+  const [ankiSendNotice, setAnkiSendNotice] = useState('');
+  const [ankiSendError, setAnkiSendError] = useState('');
+  const [historyOpen, setHistoryOpen] = useState(false);
   const [archiveUndo, setArchiveUndo] = useState<{ ids: string[]; message: string }>();
   const [locateTargetIds, setLocateTargetIds] = useState<string[]>();
   const [locatedCardIds, setLocatedCardIds] = useState<Set<string>>(() => new Set());
@@ -105,7 +176,9 @@ export function CardsPage() {
   const folderContentRequestVersion = useRef(0);
   const activeFolderIdRef = useRef<string>();
   const detailTrigger = useRef<HTMLButtonElement | null>(null);
+  const historyTrigger = useRef<HTMLButtonElement | null>(null);
   const locateHighlightTimer = useRef<number>();
+  const suppressPageBlur = useRef(false);
 
   const loadFolders = useCallback(async (signal?: AbortSignal) => {
     const version = ++folderRequestVersion.current;
@@ -176,6 +249,10 @@ export function CardsPage() {
   }, [filters.query]);
 
   useEffect(() => {
+    setPageDraft(String(filters.page));
+  }, [filters.page]);
+
+  useEffect(() => {
     if (queryDraft === filters.query) return;
     const timer = window.setTimeout(() => {
       updateSearchParams(setSearchParams, filters, { query: queryDraft, page: 1 });
@@ -212,6 +289,16 @@ export function CardsPage() {
 
   const setFilter = (patch: Partial<FilterState>) => {
     updateSearchParams(setSearchParams, filters, { ...patch, page: patch.page ?? 1 });
+  };
+
+  const submitPageDraft = (draft = pageDraft) => {
+    if (!/^\d+$/.test(draft)) {
+      setPageDraft(String(filters.page));
+      return;
+    }
+    const nextPage = Math.min(totalPages, Math.max(1, Number(draft)));
+    setPageDraft(String(nextPage));
+    if (nextPage !== filters.page) setFilter({ page: nextPage });
   };
 
   const selectContentVersion = (nextVersion: CardContentVersion) => {
@@ -322,6 +409,64 @@ export function CardsPage() {
       () => setArchiveUndo(archived ? { ids, message: '已归档 ' + ids.length + ' 张卡片' } : undefined),
     );
   };
+
+  const exportAnki = async () => {
+    if (ankiExporting) return;
+    setAnkiExporting(true);
+    setAnkiExportNotice('');
+    setAnkiExportError('');
+    try {
+      const result = await api<AnkiExportResult>('/api/anki/exports', {
+        method: 'POST',
+        body: JSON.stringify(selected.size > 0 ? { cardIds: [...selected] } : {}),
+      });
+      if (result.status === 'empty') {
+        setAnkiExportNotice('当前没有可导出的卡片');
+        return;
+      }
+      const blob = await apiBlob(`/api/anki/exports/${result.export.id}/apkg`);
+      downloadBlob(blob, result.export.apkgFileName);
+      setAnkiExportNotice(`已导出 ${result.export.count} 张卡片`);
+    } catch {
+      setAnkiExportError('Anki 导出失败，请稍后重试');
+    } finally {
+      setAnkiExporting(false);
+    }
+  };
+
+  const sendCardAnki = async (card: CardDetail) => {
+    if (ankiSendingCardId) return;
+    setAnkiSendingCardId(card.id);
+    setAnkiSendNotice('');
+    setAnkiSendError('');
+    try {
+      const result = await api<AnkiCardSendResult>(`/api/anki/cards/${card.id}/send`, {
+        method: 'POST',
+        body: JSON.stringify({}),
+      });
+      setAnkiSendNotice(`已发送“${card.normalizedStatement || '用户初始稿'}” Anki 到手机`);
+      return result;
+    } catch (error: unknown) {
+      setAnkiSendError(
+        error instanceof ApiError
+          ? error.message
+          : 'Anki 发送失败，请确认 cc-connect 已连接手机',
+      );
+    } finally {
+      setAnkiSendingCardId('');
+    }
+  };
+
+  const openHistory = (trigger: HTMLButtonElement) => {
+    historyTrigger.current = trigger;
+    setHistoryOpen(true);
+  };
+
+  const closeHistory = useCallback(() => {
+    historyTrigger.current?.focus();
+    historyTrigger.current = null;
+    setHistoryOpen(false);
+  }, []);
 
   const setCardsPosition = (cards: CardDetail[], position: 'top' | 'bottom') =>
     runAction(
@@ -536,6 +681,25 @@ export function CardsPage() {
             导出原始内容
           </button>
           <button
+            aria-label={selected.size > 0 ? `导出 Anki，已选 ${selected.size} 张卡片` : '导出 Anki'}
+            className="button button--secondary cards-export-button liquid-pressable"
+            disabled={ankiExporting}
+            onClick={() => void exportAnki()}
+            type="button"
+          >
+            {ankiExporting ? <LoaderCircle aria-hidden="true" className="is-spinning" size={17} /> : <Download aria-hidden="true" size={17} />}
+            导出 Anki
+            {selected.size > 0 ? <span aria-hidden="true" className="cards-export-button__count">{selected.size}</span> : null}
+          </button>
+          <button
+            className="button button--secondary cards-export-button liquid-pressable"
+            onClick={(event) => openHistory(event.currentTarget)}
+            type="button"
+          >
+            <History aria-hidden="true" size={17} />
+            导出记录
+          </button>
+          <button
             aria-label="重新加载"
             className="cards-icon-button liquid-pressable"
             disabled={loadState === 'loading'}
@@ -605,6 +769,18 @@ export function CardsPage() {
         >
           用户初始稿
         </button>
+        <button
+          aria-pressed="false"
+          className="liquid-pressable"
+          onClick={() => {
+            const next = new URLSearchParams(searchParams);
+            next.set('contentVersion', 'shenlun');
+            setSearchParams(next);
+          }}
+          type="button"
+        >
+          申论复盘
+        </button>
       </div>
       {contentVersion === 'original' ? (
         <CardFolderShelf
@@ -654,6 +830,43 @@ export function CardsPage() {
 
       {actionError ? <div className="cards-action-error" role="alert">{actionError}</div> : null}
       {exportError ? <div className="cards-action-error" role="alert">{exportError}</div> : null}
+      {ankiExportError ? <div className="cards-action-error" role="alert">{ankiExportError}</div> : null}
+      {ankiExportNotice ? <div className="cards-action-success" role="status">{ankiExportNotice}</div> : null}
+      {ankiSendingCardId || ankiSendError || ankiSendNotice ? createPortal(
+        <div
+          aria-live={ankiSendError ? 'assertive' : 'polite'}
+          className={`cards-anki-send-feedback liquid-glass liquid-glass--regular${ankiSendError ? ' cards-anki-send-feedback--error' : ''}`}
+          role={ankiSendError ? 'alert' : 'status'}
+        >
+          {ankiSendingCardId ? (
+            <LoaderCircle aria-hidden="true" className="is-spinning" size={19} />
+          ) : ankiSendError ? (
+            <CircleAlert aria-hidden="true" size={19} />
+          ) : (
+            <CircleCheck aria-hidden="true" size={19} />
+          )}
+          <span>
+            {ankiSendingCardId
+              ? '正在生成并发送 Anki 卡片…'
+              : ankiSendError || ankiSendNotice}
+          </span>
+          {!ankiSendingCardId ? (
+            <button
+              aria-label="关闭 Anki 发送提示"
+              className="cards-anki-send-feedback__close liquid-pressable"
+              onClick={() => {
+                setAnkiSendError('');
+                setAnkiSendNotice('');
+              }}
+              title="关闭"
+              type="button"
+            >
+              <X aria-hidden="true" size={17} />
+            </button>
+          ) : null}
+        </div>,
+        document.body,
+      ) : null}
 
       {loadState === 'loading' ? <StatusNotice state="loading" message="正在加载卡片" /> : null}
       {loadState === 'error' ? (
@@ -678,7 +891,9 @@ export function CardsPage() {
           onDetail={openDetail}
           onPositionChange={setCardsPosition}
           onRetryAi={retryCardsAi}
+          onSendAnki={(card) => void sendCardAnki(card)}
           onSelect={(cardIds, checked) => setSelected((current) => toggleSet(current, cardIds, checked))}
+          ankiSendingCardId={ankiSendingCardId}
           selected={selected}
         />
       ) : null}
@@ -694,7 +909,43 @@ export function CardsPage() {
         >
           <ChevronLeft aria-hidden="true" size={18} />
         </button>
-        <span>{loadState === 'loading' ? '加载中' : `第 ${filters.page} / ${totalPages} 页`}</span>
+        <span className="cards-pagination__status">
+          <>
+            <span>第 </span>
+            <input
+                aria-label="页码"
+                className="cards-pagination__input"
+                disabled={loadState === 'loading'}
+                inputMode="numeric"
+                onBlur={() => {
+                  if (suppressPageBlur.current) {
+                    suppressPageBlur.current = false;
+                    return;
+                  }
+                  submitPageDraft();
+                }}
+                onChange={(event) => {
+                  if (/^\d*$/.test(event.target.value)) setPageDraft(event.target.value);
+                }}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter') {
+                    event.preventDefault();
+                    submitPageDraft(event.currentTarget.value);
+                  } else if (event.key === 'Escape') {
+                    event.preventDefault();
+                    suppressPageBlur.current = true;
+                    setPageDraft(String(filters.page));
+                    event.currentTarget.blur();
+                  }
+                }}
+                style={{ width: `calc(${Math.max(2, String(totalPages).length)}ch + 16px)` }}
+                type="text"
+                value={pageDraft}
+            />
+            {' / '}{totalPages} 页
+            <span aria-hidden="true" style={{ display: 'none' }}>{`第 ${filters.page} / ${totalPages} 页`}</span>
+          </>
+        </span>
         <button
           aria-label="下一页"
           className="cards-icon-button liquid-pressable"
@@ -708,6 +959,7 @@ export function CardsPage() {
       </div>
 
       {detailGroup ? <CardDetailDrawer group={detailGroup} onClose={closeDetail} /> : null}
+      {historyOpen ? <AnkiExportHistoryPanel onClose={closeHistory} /> : null}
     </section>
   );
 }
@@ -726,7 +978,9 @@ function CardGrid({
   onDetail,
   onPositionChange,
   onRetryAi,
+  onSendAnki,
   onSelect,
+  ankiSendingCardId,
   selected,
 }: {
   actionName: string;
@@ -742,7 +996,9 @@ function CardGrid({
   onDetail: (group: CardGroup, trigger: HTMLButtonElement) => void;
   onPositionChange: (cards: CardDetail[], position: 'top' | 'bottom') => void;
   onRetryAi: (cards: CardDetail[]) => void;
+  onSendAnki: (card: CardDetail) => void;
   onSelect: (cardIds: string[], selected: boolean) => void;
+  ankiSendingCardId: string;
   selected: Set<string>;
 }) {
   return (
@@ -847,6 +1103,18 @@ function CardGrid({
               ) : null}
               <div className="cards-row-actions">
                 <button aria-label={'查看' + title + '详情'} className="liquid-pressable" onClick={(event) => onDetail(group, event.currentTarget)} title="查看详情" type="button"><Eye aria-hidden="true" size={16} /></button>
+                {contentVersion === 'original' ? (
+                  <button
+                    aria-label={'发送' + title + ' Anki 到手机'}
+                    className="liquid-pressable"
+                    disabled={Boolean(actionName) || Boolean(ankiSendingCardId) || card.archived || card.aiStatus !== 'ready'}
+                    onClick={() => onSendAnki(card)}
+                    title={card.archived || card.aiStatus !== 'ready' ? '完成 AI 整理后可发送' : '发送 Anki 到手机'}
+                    type="button"
+                  >
+                    {ankiSendingCardId === card.id ? <LoaderCircle aria-hidden="true" className="is-spinning" size={16} /> : <Send aria-hidden="true" size={16} />}
+                  </button>
+                ) : null}
                 <button
                   aria-label={'置顶' + title}
                   className="liquid-pressable"
@@ -901,6 +1169,272 @@ function CardGrid({
 }
 function canRetryAi(card: CardDetail) {
   return card.aiStatus === 'pending' || card.aiStatus === 'needs_input';
+}
+
+function AnkiExportHistoryPanel({ onClose }: { onClose: () => void }) {
+  const [historyState, setHistoryState] = useState<LoadState>('loading');
+  const [exports, setExports] = useState<AnkiExportSummary[]>([]);
+  const [reloadKey, setReloadKey] = useState(0);
+  const [detailState, setDetailState] = useState<LoadState>('ready');
+  const [detail, setDetail] = useState<AnkiExportDetail>();
+  const [selectedExport, setSelectedExport] = useState<AnkiExportSummary>();
+  const [downloadingId, setDownloadingId] = useState('');
+  const [downloadError, setDownloadError] = useState('');
+  const closeButtonRef = useRef<HTMLButtonElement>(null);
+  const panelRef = useRef<HTMLElement>(null);
+  const entranceAnimationRef = useRef<{ stop: () => void } | null>(null);
+  const detailRequestVersion = useRef(0);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    setHistoryState('loading');
+    api<AnkiExportSummary[]>('/api/anki/exports', { signal: controller.signal })
+      .then((items) => {
+        setExports(items);
+        setHistoryState('ready');
+      })
+      .catch((error: unknown) => {
+        if (isAbortError(error)) return;
+        setHistoryState('error');
+      });
+    return () => controller.abort();
+  }, [reloadKey]);
+
+  useLayoutEffect(() => {
+    const panel = panelRef.current;
+    if (!panel) return;
+    const setOffset = (value: number) => {
+      panel.style.transform = `translate3d(0, ${value}px, 0)`;
+    };
+    if (shouldReduceDrawerMotion()) {
+      setOffset(0);
+      panel.dataset.motionPhase = 'idle';
+      return;
+    }
+
+    setOffset(48);
+    let completed = false;
+    const finish = () => {
+      if (completed) return;
+      completed = true;
+      entranceAnimationRef.current = null;
+      setOffset(0);
+      panel.dataset.motionPhase = 'idle';
+    };
+    try {
+      const controls = animate(48, 0, {
+        ...momentumSpring,
+        onUpdate: setOffset,
+        onComplete: finish,
+      });
+      if (!completed) entranceAnimationRef.current = controls;
+    } catch {
+      finish();
+    }
+    return () => {
+      entranceAnimationRef.current?.stop();
+      entranceAnimationRef.current = null;
+    };
+  }, []);
+
+  useEffect(() => {
+    const dialog = panelRef.current;
+    if (!dialog) return;
+    const focusableElements = () => Array.from(dialog.querySelectorAll<HTMLElement>(
+      'button:not([disabled]), a[href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
+    ));
+    const initialFocus = focusableElements()[0] ?? dialog;
+    initialFocus.focus();
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        onClose();
+        return;
+      }
+      if (event.key !== 'Tab') return;
+
+      const elements = focusableElements();
+      if (elements.length === 0) {
+        event.preventDefault();
+        dialog.focus();
+        return;
+      }
+
+      const first = elements[0];
+      const last = elements[elements.length - 1];
+      const activeElement = document.activeElement;
+      if (event.shiftKey && (activeElement === first || !dialog.contains(activeElement))) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && (activeElement === last || !dialog.contains(activeElement))) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+    document.addEventListener('keydown', handleKeyDown);
+    return () => {
+      detailRequestVersion.current += 1;
+      document.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [onClose]);
+
+  useEffect(() => {
+    const body = document.body;
+    const previousOverflow = body.style.overflow;
+    const previousPaddingRight = body.style.paddingRight;
+    const viewportWidth = document.documentElement.clientWidth;
+    const scrollbarWidth = viewportWidth > 0
+      ? Math.max(0, window.innerWidth - viewportWidth)
+      : 0;
+    const currentPaddingRight = Number.parseFloat(window.getComputedStyle(body).paddingRight) || 0;
+
+    body.style.overflow = 'hidden';
+    if (scrollbarWidth > 0) {
+      body.style.paddingRight = `${currentPaddingRight + scrollbarWidth}px`;
+    }
+    return () => {
+      body.style.overflow = previousOverflow;
+      body.style.paddingRight = previousPaddingRight;
+    };
+  }, []);
+
+  const loadDetail = async (summary: AnkiExportSummary) => {
+    const version = ++detailRequestVersion.current;
+    setSelectedExport(summary);
+    setDetail(undefined);
+    setDetailState('loading');
+    setDownloadError('');
+    try {
+      const nextDetail = await api<AnkiExportDetail>(`/api/anki/exports/${summary.id}`);
+      if (version !== detailRequestVersion.current) return;
+      setDetail(nextDetail);
+      setDetailState('ready');
+    } catch {
+      if (version !== detailRequestVersion.current) return;
+      setDetailState('error');
+    }
+  };
+
+  const downloadExport = async (summary: AnkiExportSummary) => {
+    if (downloadingId) return;
+    setDownloadingId(summary.id);
+    setDownloadError('');
+    try {
+      const blob = await apiBlob(`/api/anki/exports/${summary.id}/apkg`);
+      downloadBlob(blob, summary.apkgFileName);
+    } catch {
+      setDownloadError('下载失败，请稍后重试');
+    } finally {
+      setDownloadingId('');
+    }
+  };
+
+  return createPortal(
+    <div
+      className="cards-anki-history-layer"
+      onClick={(event) => { if (event.target === event.currentTarget) onClose(); }}
+    >
+      <aside
+        aria-label="Anki 导出记录"
+        aria-modal="true"
+        className="cards-anki-history-panel liquid-glass liquid-glass--thick"
+        data-motion-phase="opening"
+        ref={panelRef}
+        role="dialog"
+        tabIndex={-1}
+      >
+        <header className="cards-anki-history-panel__header">
+          <div>
+            <History aria-hidden="true" size={20} />
+            <h2>导出记录</h2>
+          </div>
+          <button
+            aria-label="关闭导出记录"
+            className="cards-icon-button liquid-pressable"
+            onClick={onClose}
+            ref={closeButtonRef}
+            title="关闭导出记录"
+            type="button"
+          >
+            <X aria-hidden="true" size={18} />
+          </button>
+        </header>
+
+        <div className="cards-anki-history-panel__content">
+          <section aria-label="导出记录列表区" className="cards-anki-history-list-section">
+            {historyState === 'loading' ? <StatusNotice state="loading" message="正在加载导出记录" /> : null}
+            {historyState === 'error' ? (
+              <div className="cards-anki-history-state">
+                <StatusNotice state="error" message="导出记录加载失败，请稍后重试" />
+                <button className="button button--secondary liquid-pressable" onClick={() => setReloadKey((value) => value + 1)} type="button">
+                  重新加载导出记录
+                </button>
+              </div>
+            ) : null}
+            {historyState === 'ready' && exports.length === 0 ? <StatusNotice state="empty" message="暂无导出记录" /> : null}
+            {historyState === 'ready' && exports.length > 0 ? (
+              <ul aria-label="Anki 导出记录列表" className="cards-anki-history-list">
+                {exports.map((item) => (
+                  <li key={item.id}>
+                    <button
+                      aria-label={`查看${item.apkgFileName}详情`}
+                      className={selectedExport?.id === item.id ? 'is-selected liquid-pressable' : 'liquid-pressable'}
+                      onClick={() => void loadDetail(item)}
+                      type="button"
+                    >
+                      <span>
+                        <strong>{item.apkgFileName}</strong>
+                        <time dateTime={item.createdAt}>{new Date(item.createdAt).toLocaleString('zh-CN')}</time>
+                      </span>
+                      <span>{item.count} 张卡片</span>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            ) : null}
+          </section>
+
+          <section aria-label="导出详情区" className="cards-anki-history-detail-section">
+            {!selectedExport ? <p className="cards-anki-history-placeholder">选择一条记录查看导出内容</p> : null}
+            {detailState === 'loading' ? <StatusNotice state="loading" message="正在加载导出详情" /> : null}
+            {detailState === 'error' ? <StatusNotice state="error" message="导出详情加载失败，请稍后重试" /> : null}
+            {detailState === 'ready' && detail ? (
+              <section aria-label={`${detail.apkgFileName}详情`} className="cards-anki-history-detail">
+                <header>
+                  <div>
+                    <h3>{detail.apkgFileName}</h3>
+                    <span>{detail.count} 张卡片</span>
+                  </div>
+                  <button
+                    aria-label={`再次下载${detail.apkgFileName}`}
+                    className="button button--secondary liquid-pressable"
+                    disabled={Boolean(downloadingId)}
+                    onClick={() => void downloadExport(detail)}
+                    type="button"
+                  >
+                    {downloadingId === detail.id ? <LoaderCircle aria-hidden="true" className="is-spinning" size={17} /> : <Download aria-hidden="true" size={17} />}
+                    再次下载
+                  </button>
+                </header>
+                {downloadError ? <div className="cards-action-error" role="alert">{downloadError}</div> : null}
+                <ol>
+                  {detail.cards.map((item) => (
+                    <li key={item.id}>
+                      <span className="cards-anki-history-detail__category">{item.category || '未分类'}</span>
+                      <strong>{item.question}</strong>
+                      <p>{item.answer}</p>
+                    </li>
+                  ))}
+                </ol>
+              </section>
+            ) : null}
+          </section>
+        </div>
+      </aside>
+    </div>,
+    document.body,
+  );
 }
 
 function CardDetailDrawer({ group, onClose }: { group: CardGroup; onClose: () => void }) {

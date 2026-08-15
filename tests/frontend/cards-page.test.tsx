@@ -167,6 +167,38 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
+describe('卡片库申论复盘标签', () => {
+  it('以第三个同级标签加载申论复盘', async () => {
+    const fetchMock = vi.mocked(fetch).mockImplementation(async (input) => {
+      const path = String(input);
+      if (path === '/api/shenlun-reviews') return jsonResponse([]);
+      if (path.startsWith('/api/cards?')) return jsonResponse(searchResult());
+      throw new Error(`unexpected request: ${path}`);
+    });
+    const user = userEvent.setup();
+    renderAt('/cards');
+
+    await user.click(screen.getByRole('button', { name: '申论复盘' }));
+
+    expect(await screen.findByRole('region', { name: '申论复盘卡片库' })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: '新建申论' })).toHaveAttribute('href', '/shenlun');
+    expect(new URLSearchParams(window.location.search).get('contentVersion')).toBe('shenlun');
+    expect(fetchMock.mock.calls.filter(([path]) => String(path) === '/api/shenlun-reviews')).toHaveLength(1);
+  });
+
+  it('可从 URL 直接恢复申论复盘标签', async () => {
+    vi.mocked(fetch).mockImplementation(async (input) => {
+      if (String(input) === '/api/shenlun-reviews') return jsonResponse([]);
+      throw new Error(`unexpected request: ${String(input)}`);
+    });
+
+    renderAt('/cards?contentVersion=shenlun');
+
+    expect(await screen.findByRole('region', { name: '申论复盘卡片库' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '申论复盘' })).toHaveAttribute('aria-pressed', 'true');
+  });
+});
+
 describe('卡片库筛选与状态', () => {
   it('从 URL 恢复现有筛选、忽略旧筛选并以重复键请求卡片列表', async () => {
     const fetchMock = vi.mocked(fetch).mockResolvedValue(
@@ -317,6 +349,72 @@ describe('卡片库筛选与状态', () => {
     vi.mocked(fetch).mockResolvedValue(jsonResponse(searchResult([])));
     renderAt('/cards');
     expect(await screen.findByText('暂无符合条件的卡片')).toBeInTheDocument();
+  });
+
+  it('用户初始稿卡片可以直接通过 cc-connect 发送 Anki 到手机', async () => {
+    const fetchMock = vi.mocked(fetch).mockImplementation(async (input, init) => {
+      if (String(input) === '/api/anki/cards/card-1/send' && init?.method === 'POST') {
+        return jsonResponse({ status: 'sent', count: 1, cardId: 'card-1' });
+      }
+      if (String(input) === '/api/cards/folders') return jsonResponse([]);
+      return jsonResponse(searchResult());
+    });
+    const user = userEvent.setup();
+    renderAt('/cards?contentVersion=original');
+
+    const sendButton = await screen.findByRole('button', { name: '发送广陵与扬州为对应关系 Anki 到手机' });
+    await user.click(sendButton);
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith('/api/anki/cards/card-1/send', expect.objectContaining({ method: 'POST' }));
+    });
+    expect(await screen.findByRole('status')).toHaveTextContent('已发送');
+  });
+
+  it('发送 Anki 时立即显示进度并在失败后呈现可关闭的具体原因', async () => {
+    let resolveSend: ((response: Response) => void) | undefined;
+    vi.mocked(fetch).mockImplementation((input, init) => {
+      if (String(input) === '/api/anki/cards/card-1/send' && init?.method === 'POST') {
+        return new Promise<Response>((resolve) => { resolveSend = resolve; });
+      }
+      if (String(input) === '/api/cards/folders') return Promise.resolve(jsonResponse([]));
+      return Promise.resolve(jsonResponse(searchResult()));
+    });
+    const user = userEvent.setup();
+    renderAt('/cards?contentVersion=original');
+
+    await user.click(await screen.findByRole('button', { name: '发送广陵与扬州为对应关系 Anki 到手机' }));
+    expect(screen.getByRole('status')).toHaveTextContent('正在生成并发送 Anki 卡片');
+
+    await act(async () => {
+      resolveSend?.(jsonResponse({
+        code: 'send_failed',
+        message: '微信会话已过期，请先给 cc-connect 机器人发送一条消息后重试',
+      }, 502));
+    });
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('微信会话已过期');
+    await user.click(screen.getByRole('button', { name: '关闭 Anki 发送提示' }));
+    expect(screen.queryByText('微信会话已过期', { exact: false })).not.toBeInTheDocument();
+  });
+
+  it('Anki 发送反馈固定显示在当前视口内', async () => {
+    const css = await readFile('src/styles/cards-glass.css', 'utf8');
+
+    expect(css).toMatch(/\.cards-anki-send-feedback\s*\{[^}]*position:\s*fixed[^}]*z-index:[^}]*right:[^}]*bottom:/);
+    expect(css).toMatch(/\.cards-anki-send-feedback__close\s*\{[^}]*width:\s*40px[^}]*height:\s*40px/);
+  });
+
+  it('待整理初始稿保留发送入口但避免触发无效发送', async () => {
+    vi.mocked(fetch).mockImplementation(async (input) => {
+      if (String(input) === '/api/cards/folders') return jsonResponse([]);
+      return jsonResponse(searchResult([card({ aiStatus: 'pending', quizItems: [] })]));
+    });
+    renderAt('/cards?contentVersion=original');
+
+    const sendButton = await screen.findByRole('button', { name: '发送广陵与扬州为对应关系 Anki 到手机' });
+    expect(sendButton).toBeDisabled();
+    expect(sendButton).toHaveAttribute('title', '完成 AI 整理后可发送');
   });
 });
 
@@ -835,6 +933,355 @@ describe('卡片库表格和管理操作', () => {
     expect(screen.getByText('广陵与扬州为对应关系')).toBeInTheDocument();
   });
 
+  it('导出 Anki 会提交已选卡片、处理中禁用并在成功后立即下载和提示数量', async () => {
+    const createObjectURL = vi.fn(() => 'blob:anki-export');
+    const revokeObjectURL = vi.fn();
+    Object.defineProperty(URL, 'createObjectURL', { configurable: true, value: createObjectURL });
+    Object.defineProperty(URL, 'revokeObjectURL', { configurable: true, value: revokeObjectURL });
+    const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => undefined);
+    let resolveCreate: ((response: Response) => void) | undefined;
+    const requests: Array<{ path: string; init?: RequestInit }> = [];
+    vi.mocked(fetch).mockImplementation(async (input, init) => {
+      const path = String(input);
+      requests.push({ path, init });
+      if (path === '/api/anki/exports' && init?.method === 'POST') {
+        return new Promise<Response>((resolve) => { resolveCreate = resolve; });
+      }
+      if (path === '/api/anki/exports/export-1/apkg') return blobResponse('anki');
+      return jsonResponse(searchResult());
+    });
+    const user = userEvent.setup();
+    renderAt('/cards?query=广陵&page=1');
+
+    const checkbox = await screen.findByRole('checkbox', { name: '选择广陵与扬州为对应关系' });
+    await user.click(checkbox);
+    const exportButton = screen.getByRole('button', { name: '导出 Anki，已选 1 张卡片' });
+    expect(within(exportButton).getByText('1')).toHaveClass('cards-export-button__count');
+    await user.click(exportButton);
+
+    expect(exportButton).toBeDisabled();
+    const createRequest = requests.find(({ path, init }) => path === '/api/anki/exports' && init?.method === 'POST');
+    expect(JSON.parse(String(createRequest?.init?.body))).toEqual({ cardIds: ['card-1'] });
+
+    await act(async () => resolveCreate?.(jsonResponse({
+      status: 'created',
+      export: {
+        id: 'export-1',
+        createdAt: '2026-08-08T02:30:00.000Z',
+        count: 1,
+        apkgFileName: '公考错题-1.apkg',
+        markdownFileName: '公考错题-1.md',
+      },
+    }, 201)));
+
+    expect(await screen.findByRole('status')).toHaveTextContent('已导出 1 张卡片');
+    expect(exportButton).toBeEnabled();
+    expect(checkbox).toBeChecked();
+    expect(createObjectURL).toHaveBeenCalledTimes(1);
+    expect(click.mock.instances[0]).toHaveAttribute('download', '公考错题-1.apkg');
+    expect(revokeObjectURL).toHaveBeenCalledWith('blob:anki-export');
+  });
+
+  it('未选择卡片时导出 Anki 提交空对象，空结果显示稳定提示且保留筛选', async () => {
+    const requests: Array<{ path: string; init?: RequestInit }> = [];
+    vi.mocked(fetch).mockImplementation(async (input, init) => {
+      const path = String(input);
+      requests.push({ path, init });
+      if (path === '/api/anki/exports' && init?.method === 'POST') {
+        return jsonResponse({ status: 'empty' });
+      }
+      return jsonResponse(searchResult());
+    });
+    const user = userEvent.setup();
+    renderAt('/cards?query=广陵&archived=true&page=1');
+
+    await screen.findByText('广陵与扬州为对应关系');
+    await user.click(screen.getByRole('button', { name: '导出 Anki' }));
+
+    const createRequest = requests.find(({ path, init }) => path === '/api/anki/exports' && init?.method === 'POST');
+    expect(JSON.parse(String(createRequest?.init?.body))).toEqual({});
+    expect(await screen.findByRole('status')).toHaveTextContent('当前没有可导出的卡片');
+    expect(new URLSearchParams(window.location.search).get('query')).toBe('广陵');
+    expect(new URLSearchParams(window.location.search).get('archived')).toBe('true');
+  });
+
+  it('导出 Anki 失败时保留选择、筛选和列表并显示稳定提示', async () => {
+    vi.mocked(fetch).mockImplementation(async (input, init) => {
+      const path = String(input);
+      if (path === '/api/anki/exports' && init?.method === 'POST') {
+        return jsonResponse({ code: 'internal_error', message: '请求处理失败' }, 500);
+      }
+      return jsonResponse(searchResult());
+    });
+    const user = userEvent.setup();
+    renderAt('/cards?query=广陵&archived=false&page=1');
+
+    const checkbox = await screen.findByRole('checkbox', { name: '选择广陵与扬州为对应关系' });
+    await user.click(checkbox);
+    await user.click(screen.getByRole('button', { name: '导出 Anki，已选 1 张卡片' }));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('Anki 导出失败，请稍后重试');
+    expect(checkbox).toBeChecked();
+    expect(screen.getByText('广陵与扬州为对应关系')).toBeInTheDocument();
+    expect(new URLSearchParams(window.location.search).get('query')).toBe('广陵');
+  });
+
+  it('导出记录按服务端顺序展示本地时间和数量，可查看完整详情并再次下载', async () => {
+    const createObjectURL = vi.fn(() => 'blob:anki-history');
+    Object.defineProperty(URL, 'createObjectURL', { configurable: true, value: createObjectURL });
+    Object.defineProperty(URL, 'revokeObjectURL', { configurable: true, value: vi.fn() });
+    const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => undefined);
+    let resolveHistory: ((response: Response) => void) | undefined;
+    let resolveDetail: ((response: Response) => void) | undefined;
+    vi.mocked(fetch).mockImplementation(async (input, init) => {
+      const path = String(input);
+      if (path === '/api/anki/exports' && !init?.method) {
+        return new Promise<Response>((resolve) => { resolveHistory = resolve; });
+      }
+      if (path === '/api/anki/exports/export-2') {
+        return new Promise<Response>((resolve) => { resolveDetail = resolve; });
+      }
+      if (path === '/api/anki/exports/export-2/apkg') return blobResponse('anki');
+      return jsonResponse(searchResult());
+    });
+    const user = userEvent.setup();
+    renderAt('/cards');
+
+    await screen.findByText('广陵与扬州为对应关系');
+    await user.click(screen.getByRole('button', { name: '导出记录' }));
+    const dialog = screen.getByRole('dialog', { name: 'Anki 导出记录' });
+    expect(within(dialog).getByText('正在加载导出记录')).toBeInTheDocument();
+
+    await act(async () => resolveHistory?.(jsonResponse([
+      {
+        id: 'export-2',
+        createdAt: '2026-08-08T02:30:00.000Z',
+        count: 2,
+        apkgFileName: '第二次导出.apkg',
+        markdownFileName: '第二次导出.md',
+      },
+      {
+        id: 'export-1',
+        createdAt: '2026-08-07T01:00:00.000Z',
+        count: 1,
+        apkgFileName: '第一次导出.apkg',
+        markdownFileName: '第一次导出.md',
+      },
+    ])));
+
+    const list = await within(dialog).findByRole('list', { name: 'Anki 导出记录列表' });
+    const items = within(list).getAllByRole('listitem');
+    expect(items).toHaveLength(2);
+    expect(items[0]).toHaveTextContent('第二次导出.apkg');
+    expect(items[1]).toHaveTextContent('第一次导出.apkg');
+    expect(items[0]).toHaveTextContent('2 张卡片');
+    expect(items[0]).toHaveTextContent(new Date('2026-08-08T02:30:00.000Z').toLocaleString('zh-CN'));
+
+    await user.click(within(items[0]).getByRole('button', { name: '查看第二次导出.apkg详情' }));
+    expect(within(dialog).getByText('正在加载导出详情')).toBeInTheDocument();
+    await act(async () => resolveDetail?.(jsonResponse({
+      id: 'export-2',
+      createdAt: '2026-08-08T02:30:00.000Z',
+      count: 2,
+      apkgFileName: '第二次导出.apkg',
+      markdownFileName: '第二次导出.md',
+      cards: [
+        { id: 'card-1', category: '常识判断', question: '广陵对应哪里？', answer: '扬州\n今江苏省扬州市。' },
+        { id: 'card-2', category: '言语理解', question: '成语含义？', answer: '完整答案内容' },
+      ],
+    })));
+    const detail = await within(dialog).findByRole('region', { name: '第二次导出.apkg详情' });
+    expect(within(detail).getByText('常识判断')).toBeInTheDocument();
+    expect(within(detail).getByText('广陵对应哪里？')).toBeInTheDocument();
+    expect(within(detail).getByText(/扬州\s+今江苏省扬州市。/)).toBeInTheDocument();
+
+    await user.click(within(detail).getByRole('button', { name: '再次下载第二次导出.apkg' }));
+    await waitFor(() => expect(createObjectURL).toHaveBeenCalledTimes(1));
+    expect(click.mock.instances[0]).toHaveAttribute('download', '第二次导出.apkg');
+  });
+
+  it('导出记录支持空状态和三种关闭方式，关闭后焦点回到触发按钮', async () => {
+    vi.mocked(fetch).mockImplementation(async (input) => {
+      if (String(input) === '/api/anki/exports') return jsonResponse([]);
+      return jsonResponse(searchResult());
+    });
+    const user = userEvent.setup();
+    renderAt('/cards');
+
+    const historyButton = await screen.findByRole('button', { name: '导出记录' });
+    await user.click(historyButton);
+    expect(await screen.findByText('暂无导出记录')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: '关闭导出记录' }));
+    expect(screen.queryByRole('dialog', { name: 'Anki 导出记录' })).not.toBeInTheDocument();
+    expect(historyButton).toHaveFocus();
+
+    await user.click(historyButton);
+    await screen.findByText('暂无导出记录');
+    const overlay = document.querySelector<HTMLElement>('.cards-anki-history-layer');
+    expect(overlay).not.toBeNull();
+    await user.click(overlay!);
+    expect(screen.queryByRole('dialog', { name: 'Anki 导出记录' })).not.toBeInTheDocument();
+    expect(historyButton).toHaveFocus();
+
+    await user.click(historyButton);
+    await screen.findByText('暂无导出记录');
+    fireEvent.keyDown(document, { key: 'Escape' });
+    expect(screen.queryByRole('dialog', { name: 'Anki 导出记录' })).not.toBeInTheDocument();
+    expect(historyButton).toHaveFocus();
+  });
+
+  it('导出记录面板将 Tab 和 Shift+Tab 焦点循环限制在对话框内', async () => {
+    vi.mocked(fetch).mockImplementation(async (input) => {
+      if (String(input) === '/api/anki/exports') {
+        return jsonResponse([{
+          id: 'export-1',
+          createdAt: '2026-08-08T02:30:00.000Z',
+          count: 1,
+          apkgFileName: '焦点测试.apkg',
+          markdownFileName: '焦点测试.md',
+        }]);
+      }
+      return jsonResponse(searchResult());
+    });
+    const user = userEvent.setup();
+    renderAt('/cards');
+
+    const historyButton = await screen.findByRole('button', { name: '导出记录' });
+    await user.click(historyButton);
+    const dialog = screen.getByRole('dialog', { name: 'Anki 导出记录' });
+    const closeButton = within(dialog).getByRole('button', { name: '关闭导出记录' });
+    const viewButton = await within(dialog).findByRole('button', { name: '查看焦点测试.apkg详情' });
+
+    viewButton.focus();
+    fireEvent.keyDown(document, { key: 'Tab' });
+    expect(closeButton).toHaveFocus();
+
+    closeButton.focus();
+    fireEvent.keyDown(document, { key: 'Tab', shiftKey: true });
+    expect(viewButton).toHaveFocus();
+
+    historyButton.focus();
+    fireEvent.keyDown(document, { key: 'Tab' });
+    expect(closeButton).toHaveFocus();
+  });
+
+  it('导出记录面板锁定滚动时补偿滚动条宽度，并在关闭或卸载后恢复原样', async () => {
+    document.body.style.overflow = 'clip';
+    document.body.style.paddingRight = '12px';
+    const innerWidthDescriptor = Object.getOwnPropertyDescriptor(window, 'innerWidth');
+    const clientWidthDescriptor = Object.getOwnPropertyDescriptor(document.documentElement, 'clientWidth');
+    Object.defineProperty(window, 'innerWidth', { configurable: true, value: 1000 });
+    Object.defineProperty(document.documentElement, 'clientWidth', { configurable: true, value: 980 });
+    vi.mocked(fetch).mockImplementation(async (input) => {
+      if (String(input) === '/api/anki/exports') return jsonResponse([]);
+      return jsonResponse(searchResult());
+    });
+    const user = userEvent.setup();
+    const view = renderAt('/cards');
+    try {
+      const historyButton = await screen.findByRole('button', { name: '导出记录' });
+      await user.click(historyButton);
+      expect(document.body.style.overflow).toBe('hidden');
+      expect(document.body.style.paddingRight).toBe('32px');
+
+      await user.click(screen.getByRole('button', { name: '关闭导出记录' }));
+      expect(document.body.style.overflow).toBe('clip');
+      expect(document.body.style.paddingRight).toBe('12px');
+
+      await user.click(historyButton);
+      expect(document.body.style.overflow).toBe('hidden');
+      expect(document.body.style.paddingRight).toBe('32px');
+      view.unmount();
+      expect(document.body.style.overflow).toBe('clip');
+      expect(document.body.style.paddingRight).toBe('12px');
+    } finally {
+      view.unmount();
+      if (innerWidthDescriptor) Object.defineProperty(window, 'innerWidth', innerWidthDescriptor);
+      else Reflect.deleteProperty(window, 'innerWidth');
+      if (clientWidthDescriptor) Object.defineProperty(document.documentElement, 'clientWidth', clientWidthDescriptor);
+      else Reflect.deleteProperty(document.documentElement, 'clientWidth');
+    }
+  });
+
+  it('导出记录面板以轻量弹簧从底部进入，并在两种减少动态设置下跳过动画', async () => {
+    vi.mocked(fetch).mockImplementation(async (input) => {
+      if (String(input) === '/api/anki/exports') return jsonResponse([]);
+      return jsonResponse(searchResult());
+    });
+    const user = userEvent.setup();
+    renderAt('/cards');
+    const historyButton = await screen.findByRole('button', { name: '导出记录' });
+
+    motionMock.animate.mockClear();
+    await user.click(historyButton);
+    expect(motionMock.animate).toHaveBeenCalledWith(48, 0, expect.objectContaining({
+      bounce: 0.2,
+      onComplete: expect.any(Function),
+      onUpdate: expect.any(Function),
+      type: 'spring',
+    }));
+    expect(screen.getByRole('dialog', { name: 'Anki 导出记录' })).toHaveAttribute('data-motion-phase', 'idle');
+    await user.click(screen.getByRole('button', { name: '关闭导出记录' }));
+
+    document.documentElement.dataset.motion = 'reduced';
+    motionMock.animate.mockClear();
+    await user.click(historyButton);
+    expect(motionMock.animate).not.toHaveBeenCalled();
+    expect(screen.getByRole('dialog', { name: 'Anki 导出记录' })).toHaveStyle({ transform: 'translate3d(0, 0px, 0)' });
+    await user.click(screen.getByRole('button', { name: '关闭导出记录' }));
+
+    document.documentElement.removeAttribute('data-motion');
+    vi.stubGlobal('matchMedia', vi.fn(() => ({ matches: true })));
+    motionMock.animate.mockClear();
+    await user.click(historyButton);
+    expect(motionMock.animate).not.toHaveBeenCalled();
+    expect(screen.getByRole('dialog', { name: 'Anki 导出记录' })).toHaveStyle({ transform: 'translate3d(0, 0px, 0)' });
+  });
+
+  it('导出记录和详情请求失败时在面板内显示稳定错误', async () => {
+    let historyFailed = true;
+    vi.mocked(fetch).mockImplementation(async (input) => {
+      const path = String(input);
+      if (path === '/api/anki/exports' && historyFailed) {
+        return jsonResponse({ code: 'internal_error', message: '请求处理失败' }, 500);
+      }
+      if (path === '/api/anki/exports') {
+        return jsonResponse([{
+          id: 'export-1',
+          createdAt: '2026-08-08T02:30:00.000Z',
+          count: 1,
+          apkgFileName: '失败详情.apkg',
+          markdownFileName: '失败详情.md',
+        }]);
+      }
+      if (path === '/api/anki/exports/export-1') {
+        return jsonResponse({ code: 'internal_error', message: '请求处理失败' }, 500);
+      }
+      return jsonResponse(searchResult());
+    });
+    const user = userEvent.setup();
+    renderAt('/cards');
+
+    await screen.findByText('广陵与扬州为对应关系');
+    await user.click(screen.getByRole('button', { name: '导出记录' }));
+    const dialog = screen.getByRole('dialog', { name: 'Anki 导出记录' });
+    expect(await within(dialog).findByRole('alert')).toHaveTextContent('导出记录加载失败，请稍后重试');
+
+    historyFailed = false;
+    await user.click(within(dialog).getByRole('button', { name: '重新加载导出记录' }));
+    await user.click(await within(dialog).findByRole('button', { name: '查看失败详情.apkg详情' }));
+    expect(await within(dialog).findByRole('alert')).toHaveTextContent('导出详情加载失败，请稍后重试');
+  });
+
+  it('导出记录使用近不透明底部玻璃面板、无背景模糊并适配减少动态效果', async () => {
+    const css = await readFile('src/styles/cards-glass.css', 'utf8');
+
+    expect(css).toMatch(/\.cards-anki-history-layer\s*\{[^}]*align-items:\s*flex-end[^}]*background:\s*rgba\(35, 38, 43, 0\.24\)[^}]*backdrop-filter:\s*none/);
+    expect(css).toMatch(/\.cards-anki-history-panel\.liquid-glass\s*\{[^}]*background:\s*rgba\(255, 255, 255, 0\.96\)/);
+    expect(css).toMatch(/html\[data-motion='reduced'\] \.cards-anki-history-panel\s*\{[^}]*animation:\s*none[^}]*transition:\s*none/);
+    expect(css).toMatch(/@media \(prefers-reduced-motion: reduce\)\s*\{[^}]*\.cards-anki-history-panel[^{]*\{[^}]*animation:\s*none[^}]*transition:\s*none/);
+  });
+
   it('用语义化小卡片列表呈现状态、元数据和管理操作', async () => {
     vi.mocked(fetch).mockResolvedValue(
       jsonResponse(searchResult([card({ aiStatus: 'needs_input' }), card({ id: 'card-2', normalizedStatement: '待整理卡片', aiStatus: 'pending' })])),
@@ -866,6 +1313,10 @@ describe('卡片库表格和管理操作', () => {
     expect(screen.getByLabelText('卡片分页')).toHaveClass('liquid-glass', 'liquid-glass--thin');
     expect(screen.getByRole('button', { name: '导出原始内容' })).toHaveClass('liquid-pressable');
     expect(screen.getByRole('button', { name: '上一页' })).toHaveClass('liquid-pressable');
+
+    const css = await readFile('src/styles/cards-glass.css', 'utf8');
+    expect(css).toMatch(/\.cards-pagination__input\s*\{[^}]*min-height:\s*44px[^}]*border-radius:\s*var\(--glass-radius-control\)/);
+    expect(css).toMatch(/\.cards-pagination__input:focus-visible\s*\{[^}]*box-shadow:/);
 
     const cardCheckbox = screen.getByRole('checkbox', { name: '选择广陵与扬州为对应关系' });
     expect(cardCheckbox.closest('label')).toHaveClass('cards-card__select', 'liquid-pressable');
@@ -1407,6 +1858,143 @@ describe('卡片库表格和管理操作', () => {
     await waitFor(() => expect(nextPage).not.toBeDisabled());
     await user.click(nextPage);
     expect(new URLSearchParams(window.location.search).get('page')).toBe('2');
+  });
+
+  it('页码输入按 Enter 跳转并写入 URL', async () => {
+    const fetchMock = vi.mocked(fetch).mockImplementation(async (input) => {
+      const params = new URL(String(input), 'http://localhost').searchParams;
+      return jsonResponse({ items: [], total: 41, page: Number(params.get('page')), pageSize: 20 });
+    });
+    const user = userEvent.setup();
+    renderAt('/cards?page=1&pageSize=20');
+
+    const input = await screen.findByRole('textbox', { name: '页码' });
+    await user.clear(input);
+    await user.type(input, '2');
+    await user.keyboard('{Enter}');
+
+    await waitFor(() => expect(new URLSearchParams(window.location.search).get('page')).toBe('2'));
+    expect(fetchMock.mock.calls.some(([path]) => String(path).includes('page=2'))).toBe(true);
+  });
+
+  it('页码输入失焦时收敛到总页数上界', async () => {
+    vi.mocked(fetch).mockImplementation(async (input) => {
+      const params = new URL(String(input), 'http://localhost').searchParams;
+      return jsonResponse({ items: [], total: 41, page: Number(params.get('page')), pageSize: 20 });
+    });
+    const user = userEvent.setup();
+    renderAt('/cards?page=1&pageSize=20');
+
+    const input = await screen.findByRole('textbox', { name: '页码' });
+    await user.clear(input);
+    await user.type(input, '99');
+    await user.tab();
+
+    await waitFor(() => expect(new URLSearchParams(window.location.search).get('page')).toBe('3'));
+    expect(input).toHaveValue('3');
+  });
+
+  it('页码输入 Escape 取消草稿且不因 blur 再次提交', async () => {
+    const fetchMock = vi.mocked(fetch).mockImplementation(async (input) => {
+      const params = new URL(String(input), 'http://localhost').searchParams;
+      return jsonResponse({ items: [], total: 41, page: Number(params.get('page')), pageSize: 20 });
+    });
+    const user = userEvent.setup();
+    renderAt('/cards?page=2&pageSize=20');
+
+    const input = await screen.findByRole('textbox', { name: '页码' });
+    await user.clear(input);
+    await user.type(input, '3');
+    await user.keyboard('{Escape}');
+
+    expect(input).toHaveValue('2');
+    expect(document.activeElement).not.toBe(input);
+    expect(new URLSearchParams(window.location.search).get('page')).toBe('2');
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('页码输入空值失焦恢复当前页且不发请求', async () => {
+    const fetchMock = vi.mocked(fetch).mockResolvedValue(
+      jsonResponse({ items: [], total: 41, page: 2, pageSize: 20 }),
+    );
+    const user = userEvent.setup();
+    renderAt('/cards?page=2&pageSize=20');
+
+    const input = await screen.findByRole('textbox', { name: '页码' });
+    await user.clear(input);
+    await user.tab();
+
+    expect(input).toHaveValue('2');
+    expect(new URLSearchParams(window.location.search).get('page')).toBe('2');
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('加载期间禁用页码输入', async () => {
+    vi.mocked(fetch).mockImplementation(() => new Promise<Response>(() => undefined));
+    renderAt('/cards?page=1&pageSize=20');
+
+    const input = await screen.findByRole('textbox', { name: '页码' });
+    expect(input).toBeDisabled();
+  });
+
+  it('页码输入忽略非数字字符且提交当前页时不发请求', async () => {
+    const fetchMock = vi.mocked(fetch).mockResolvedValue(
+      jsonResponse({ items: [], total: 41, page: 2, pageSize: 20 }),
+    );
+    const user = userEvent.setup();
+    renderAt('/cards?page=2&pageSize=20');
+
+    const input = await screen.findByRole('textbox', { name: '页码' });
+    await user.clear(input);
+    await user.type(input, '2x');
+    expect(input).toHaveValue('2');
+    await user.keyboard('{Enter}');
+
+    expect(input).toHaveValue('2');
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('四位总页数为页码数字和内边距预留稳定宽度', async () => {
+    vi.mocked(fetch).mockResolvedValue(
+      jsonResponse({ items: [], total: 20_000, page: 1, pageSize: 20 }),
+    );
+    renderAt('/cards?page=1&pageSize=20');
+
+    const input = await screen.findByRole('textbox', { name: '页码' });
+    await waitFor(() => expect(input).not.toBeDisabled());
+    expect(input).toHaveStyle({ width: 'calc(4ch + 16px)' });
+  });
+
+  it('页码输入 0 提交时收敛到第一页', async () => {
+    const fetchMock = vi.mocked(fetch).mockImplementation(async (input) => {
+      const params = new URL(String(input), 'http://localhost').searchParams;
+      return jsonResponse({ items: [], total: 41, page: Number(params.get('page')), pageSize: 20 });
+    });
+    const user = userEvent.setup();
+    renderAt('/cards?page=2&pageSize=20');
+
+    const input = await screen.findByRole('textbox', { name: '页码' });
+    await user.clear(input);
+    await user.type(input, '0');
+    await user.keyboard('{Enter}');
+
+    await waitFor(() => expect(new URLSearchParams(window.location.search).get('page')).toBe('1'));
+    expect(input).toHaveValue('1');
+    expect(fetchMock.mock.calls.some(([path]) => String(path).includes('page=1'))).toBe(true);
+  });
+
+  it('页码输入当前页提交时不重复请求', async () => {
+    const fetchMock = vi.mocked(fetch).mockResolvedValue(
+      jsonResponse({ items: [], total: 41, page: 2, pageSize: 20 }),
+    );
+    const user = userEvent.setup();
+    renderAt('/cards?page=2&pageSize=20');
+
+    const input = await screen.findByRole('textbox', { name: '页码' });
+    await user.click(input);
+    await user.keyboard('{Enter}');
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
   it('单卡归档后可立即撤销，已归档视图可恢复归档', async () => {

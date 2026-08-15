@@ -103,4 +103,12 @@ describe('液态玻璃基础样式', () => {
     expect(globalImport).toBeGreaterThan(-1);
     expect(glassImport).toBeGreaterThan(globalImport);
   });
+
+  it('横向图谱搜索浮层使用视口高度而不会被顶部表单裁切', async () => {
+    const css = await readFile(projectFile('src/styles/graphs.css'), 'utf8');
+    const searchPanelRule = css.match(/\.graphs-horizontal-card-search\s*\{[^}]*\}/)?.[0] ?? '';
+
+    expect(searchPanelRule).toMatch(/max-height:\s*min\(500px,\s*calc\(100dvh\s*-/);
+    expect(searchPanelRule).not.toMatch(/max-height:[^;]*100%/);
+  });
 });

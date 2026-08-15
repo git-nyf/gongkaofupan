@@ -560,6 +560,11 @@ describe('SQLite 与图片备份恢复', () => {
       { version: 3 },
       { version: 4 },
       { version: 5 },
+      { version: 6 },
+      { version: 7 },
+      { version: 8 },
+      { version: 9 },
+      { version: 10 },
     ]);
   });
 

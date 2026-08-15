@@ -105,6 +105,11 @@ describe('卡片库用户初始稿文件夹', () => {
         { version: 3 },
         { version: 4 },
         { version: 5 },
+        { version: 6 },
+        { version: 7 },
+        { version: 8 },
+        { version: 9 },
+        { version: 10 },
       ]);
       expect(
         database

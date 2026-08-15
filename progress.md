@@ -3150,3 +3150,1679 @@
 - `docs/本地运行与数据管理.md`：记录定位时的筛选变化、视觉反馈和数据不变边界。
 - `progress.md`：仅在末尾追加本轮实现、验证、文件清单与回滚说明。
 - 回滚方式：执行 `git restore -- README.md docs/本地运行与数据管理.md progress.md src/components/CardFolderShelf.tsx src/pages/CardsPage.tsx src/styles/cards-glass.css tests/frontend/cards-page.test.tsx` 可撤销本轮全部改动；本轮无数据库迁移和真实业务数据写入，无需数据回滚。
+
+## 2026-08-01 - Task: 新增球状 3D 知识图谱
+
+### What was done
+
+- 新增独立“图谱”板块，进入 `/graphs` 后展示球状 3D 知识图谱，支持多图谱切换、预览自转、编辑模式、卡片拖入建点、节点拖动保存坐标、节点详情和关系标签编辑。
+- 新增知识图谱数据库迁移、共享类型、服务端仓储和 `/api/knowledge-maps` 路由，覆盖图谱、节点和关系的增删改查，并通过外键级联处理卡片删除后的图谱清理。
+- 前端沿用液态玻璃视觉体系，加入右侧卡片搜索、详情和关系面板；预览模式下自转可被用户点击、拖拽、滚轮和聚焦动作中断，减少动态效果时保持静态 3D 视图。
+- 同步补充中文使用说明，明确入口、预览、编辑、关系、迁移数据和验证方式。
+
+### Testing
+
+- `npm run typecheck`：通过，前端与服务端 TypeScript 检查无错误。
+- `npx vitest run tests/server/database.test.ts tests/server/knowledge-maps.test.ts tests/frontend/graphs-page.test.tsx tests/frontend/app-shell.test.tsx tests/frontend/app.test.tsx`：通过，5 个测试文件、43 项测试全部通过。
+- `npm test`：通过，43 个测试文件、584 项测试全部通过。
+- `npm run build`：通过，客户端与服务端生产构建成功；客户端主包因新增 3D/WebGL 依赖超过 500KB，构建仅输出非阻塞提示。
+- Playwright 真实生产服务验证：使用临时数据库打开 `/graphs`，桌面 1440×900 与移动 390×844 视口均生成非空 canvas；两帧 canvas 截图像素校验不同，确认预览自转可见；右侧面板与 3D 主操作区在两个视口下均可见。
+- `git diff --check`：通过，仅有工作树既有 LF/CRLF 转换提示。
+- `npm audit --omit=dev --audit-level=critical`：通过，无 critical；当前依赖树仍提示 3 个 high，涉及 `brace-expansion` 与 `react-router/react-router-dom`，本轮未执行 `npm audit fix` 以避免扩大升级范围。
+
+### Notes
+
+- `package.json`：新增 `react-force-graph-3d` 运行依赖。
+- `package-lock.json`：锁定 3D 图谱依赖及其 WebGL/ThreeJS 相关传递依赖。
+- `shared/contracts.ts`：新增知识图谱摘要、详情、节点和关系共享类型。
+- `server/db/migrations/006_knowledge_maps.sql`：新增图谱、节点和关系三张 SQLite 表及索引、唯一约束和级联外键。
+- `server/db/migrations.ts`：接入版本 6 数据库迁移。
+- `server/knowledgeMaps/repository.ts`：新增知识图谱数据访问、约束映射和图谱更新时间维护。
+- `server/knowledgeMaps/service.ts`：新增知识图谱业务服务，并把节点映射到现有卡片详情。
+- `server/knowledgeMaps/routes.ts`：新增 `/api/knowledge-maps` 路由和错误响应。
+- `server/app.ts`：挂载知识图谱 API 路由。
+- `server/index.ts`：生产启动时创建并注入知识图谱服务。
+- `src/App.tsx`：新增 `/graphs` 页面路由。
+- `src/components/AppShell.tsx`：在主导航加入“图谱”入口。
+- `src/pages/GraphsPage.tsx`：新增球状 3D 图谱页面、卡片拖入、节点详情、关系编辑和自转控制。
+- `src/styles/graphs.css`：新增图谱页面液态玻璃布局、画布、侧栏、详情和关系面板样式。
+- `tests/server/database.test.ts`：补充版本 6 迁移、表和索引断言。
+- `tests/server/knowledge-maps.test.ts`：新增知识图谱 API、约束和卡片删除级联测试。
+- `tests/server/backups.test.ts`：同步真实旧库恢复后的迁移版本断言到版本 6。
+- `tests/server/card-folders.test.ts`：同步从版本 4 迁移后的版本断言到版本 6。
+- `tests/frontend/graphs-page.test.tsx`：新增图谱页面预览、编辑、拖入节点和关系标签测试。
+- `docs/知识图谱.md`：新增图谱使用、数据和验证说明。
+- `progress.md`：仅在末尾追加本轮实现、验证、文件清单与回滚说明。
+- 回滚方式：代码层执行 `git restore -- package.json package-lock.json shared/contracts.ts server/app.ts server/db/migrations.ts server/index.ts src/App.tsx src/components/AppShell.tsx tests/server/backups.test.ts tests/server/card-folders.test.ts tests/server/database.test.ts progress.md`，再执行 `Remove-Item -LiteralPath @('server\db\migrations\006_knowledge_maps.sql','server\knowledgeMaps','src\pages\GraphsPage.tsx','src\styles\graphs.css','tests\frontend\graphs-page.test.tsx','tests\server\knowledge-maps.test.ts','docs\知识图谱.md') -Recurse -Force` 删除本轮新增文件；若真实数据库已运行版本 6 迁移，应先备份数据库，再恢复迁移前备份，或执行 `DROP TABLE knowledge_map_edges; DROP TABLE knowledge_map_nodes; DROP TABLE knowledge_maps; DELETE FROM schema_migrations WHERE version = 6;` 后重新启动应用。
+
+## 2026-08-01 - Task: 修复图谱创建按钮和导航位置
+
+### What was done
+
+- 修复图谱页空输入点击“添加图谱”没有反应的问题；现在未填写名称时会自动创建不重名的默认图谱名称。
+- 将左侧主导航中的“图谱”入口移动到倒数第二位，位于“设置”前面。
+- 同步更新图谱使用说明，并补充前端回归测试覆盖默认创建和导航顺序。
+
+### Testing
+
+- `npm run typecheck`：通过，前端与服务端 TypeScript 检查无错误。
+- `npx vitest run tests/frontend/graphs-page.test.tsx tests/frontend/app-shell.test.tsx`：通过，2 个测试文件、27 项测试全部通过。
+- `npm test`：通过，43 个测试文件、586 项测试全部通过。
+- `npm run build`：通过，客户端与服务端生产构建成功；客户端主包仍有 3D/WebGL 依赖导致的大包非阻塞提示。
+
+### Notes
+
+- `src/pages/GraphsPage.tsx`：空名称创建图谱时自动生成默认名称，并把创建按钮可访问名称改为“添加图谱”。
+- `src/components/AppShell.tsx`：调整主导航顺序，将“图谱”移动到“设置”前。
+- `tests/frontend/graphs-page.test.tsx`：新增空输入点击添加图谱的回归测试。
+- `tests/frontend/app-shell.test.tsx`：新增主导航顺序断言，并将图谱入口纳入固定入口检查。
+- `docs/知识图谱.md`：补充直接点击“添加图谱”会自动生成默认名称的说明。
+- `progress.md`：仅在末尾追加本轮修复、验证、文件清单与回滚说明。
+- 回滚方式：执行 `git restore -- src/pages/GraphsPage.tsx src/components/AppShell.tsx tests/frontend/graphs-page.test.tsx tests/frontend/app-shell.test.tsx docs/知识图谱.md progress.md` 可撤销本轮修复；本轮未新增数据库迁移，也不会修改真实业务数据。
+
+## 2026-08-01 - Task: 强化图谱添加链路
+
+### What was done
+
+- 将空名称默认图谱生成下沉到服务端，前端空输入时发送空对象，由后端按数据库真实状态创建 `知识图谱 N`。
+- 图谱创建失败时在左侧创建区显示明确错误提示，不再只把顶部状态改成“保存失败”。
+- 保持手动输入同名图谱仍然拒绝的原规则，避免默默创建用户未指定的新名称。
+
+### Testing
+
+- `npm run typecheck`：通过，前端与服务端 TypeScript 检查无错误。
+- `npx vitest run tests/server/knowledge-maps.test.ts tests/frontend/graphs-page.test.tsx tests/frontend/app-shell.test.tsx`：通过，3 个测试文件、30 项测试全部通过。
+- `npm test`：通过，43 个测试文件、586 项测试全部通过。
+- `npm run build`：通过，客户端与服务端生产构建成功；客户端主包仍有 3D/WebGL 依赖导致的大包非阻塞提示。
+- Playwright 真实生产服务验证：使用临时数据库打开 `/graphs`，直接点击创建区按钮后接口返回 1 张图谱，页面标题变为 `知识图谱 1`，错误提示数量为 0。
+
+### Notes
+
+- `server/knowledgeMaps/routes.ts`：创建图谱接口允许缺省名称，并继续限制显式名称长度。
+- `server/knowledgeMaps/service.ts`：新增服务端默认图谱名称生成逻辑。
+- `src/pages/GraphsPage.tsx`：空输入时发送空对象，并显示创建失败原因。
+- `src/styles/graphs.css`：新增创建错误提示样式。
+- `tests/server/knowledge-maps.test.ts`：覆盖空对象创建默认图谱。
+- `tests/frontend/graphs-page.test.tsx`：同步空输入创建请求断言。
+- `progress.md`：仅在末尾追加本轮修复、验证、文件清单与回滚说明。
+- 回滚方式：执行 `git restore -- server/knowledgeMaps/routes.ts server/knowledgeMaps/service.ts src/pages/GraphsPage.tsx src/styles/graphs.css tests/server/knowledge-maps.test.ts tests/frontend/graphs-page.test.tsx progress.md` 可撤销本轮强化；本轮未新增数据库迁移，真实数据无需回滚。
+
+## 2026-08-01 - Task: 优化图谱一屏布局与确认式连线
+
+### What was done
+
+- 将图谱页高度收敛到当前工作区一屏内，图谱列表、卡片搜索、详情和关系面板改为各自内部滚动，不再把整页撑长。
+- 图谱加载后自动居中适屏，并在工具栏新增“居中”按钮，方便从缩放或拖动状态快速回到中心视野。
+- 参考 `nashsu/llm_wiki` 的适屏和明确操作思路，保留当前 3D 球状视觉，优化为编辑模式下可直接点击“连线”，再选择起点、目标、标签，最后点击“创建关系”才保存。
+- 关系预设标签在创建前即可选择；已存在关系仍可点击关系线后改标签或删除。
+
+### Testing
+
+- `npm run typecheck`：通过，前端与服务端 TypeScript 检查无错误。
+- `npx vitest run tests/frontend/graphs-page.test.tsx tests/frontend/app-shell.test.tsx tests/server/knowledge-maps.test.ts`：通过，3 个测试文件、30 项测试全部通过。
+- `npm test`：通过，43 个测试文件、586 项测试全部通过。
+- `npm run build`：通过，客户端与服务端生产构建成功；客户端主包仍有 3D/WebGL 依赖导致的大包非阻塞提示。
+- Playwright 真实生产服务验证：桌面 1440×900 与移动 390×844 视口下 `scrollHeight` 均等于视口高度，canvas 非空且保留在一屏内；编辑后点击工具栏“连线”可打开关系面板。
+
+### Notes
+
+- `src/pages/GraphsPage.tsx`：新增居中适屏控制、加载后自动居中、工具栏连线入口和确认式关系创建流程。
+- `src/styles/graphs.css`：调整图谱页为一屏固定工作区，侧栏和面板内部滚动，并新增待创建关系确认区样式。
+- `tests/frontend/graphs-page.test.tsx`：覆盖居中按钮和确认后才创建关系的前端行为。
+- `docs/知识图谱.md`：更新一屏布局、居中按钮和确认式连线说明。
+- `progress.md`：仅在末尾追加本轮优化、验证、文件清单与回滚说明。
+- 回滚方式：执行 `git restore -- src/pages/GraphsPage.tsx src/styles/graphs.css tests/frontend/graphs-page.test.tsx docs/知识图谱.md progress.md` 可撤销本轮优化；本轮未新增数据库迁移，真实数据无需回滚。
+
+## 2026-08-01 - Task: 优化图谱 2D 编辑与 3D 预览
+
+### What was done
+
+- 将图谱编辑模式改为 2D 平面关系编辑：进入编辑后中间区域显示可拖拽的 2D 圆盘，用户在平面内移动节点、选择节点并创建关系，降低 3D 空间连线的操作难度。
+- 保留预览模式的 3D 球形知识图谱：退出编辑后自动把 2D 平面坐标投影为球面 `x/y/z` 坐标，并继续以 3D 球状自转方式展示。
+- 参考 `nashsu/llm_wiki` 的图谱浏览思路，在 Apple Design 风格基础上补充板块、关系、掌握度三种视图，增加关系权重、悬停邻域高亮、图例、统计信息和孤立节点提示。
+- 调整卡片拖入和节点移动保存逻辑：编辑模式下拖入到 2D 圆盘即可建点，拖动已有节点会保存投影后的 3D 坐标；本轮未修改数据库结构。
+
+### Testing
+
+- `npm run typecheck`：通过，前端与服务端 TypeScript 检查无错误。
+- `npx vitest run tests/frontend/graphs-page.test.tsx tests/frontend/app-shell.test.tsx tests/server/knowledge-maps.test.ts`：通过，3 个测试文件、30 项测试全部通过。
+- `npm test`：通过，43 个测试文件、586 项测试全部通过。
+- `npm run build`：通过，客户端与服务端生产构建成功；客户端主包仍有 3D/WebGL 依赖导致的大包非阻塞提示。
+- Playwright 真实生产服务验证：使用临时数据库打开 `/graphs`，预览模式存在 3D canvas；切换编辑后显示 2D 关系编辑平面且不再显示 3D canvas；拖动 2D 节点后保存状态出现，接口返回的节点 `x/y/z` 坐标已变化；退出编辑后 3D canvas 恢复显示。
+
+### Notes
+
+- `src/pages/GraphsPage.tsx`：新增 2D 编辑平面、平面与球面坐标投影、视图模式、悬停邻域高亮、关系权重和图谱统计展示。
+- `src/styles/graphs.css`：新增 2D 平面编辑器、关系标签、节点拖拽反馈、图谱状态栏和视图切换控件样式。
+- `tests/frontend/graphs-page.test.tsx`：更新图谱页测试，覆盖编辑模式显示 2D 平面、视图切换和关系创建流程。
+- `docs/知识图谱.md`：更新图谱使用说明，说明编辑走 2D 平面、预览自动转为 3D 球形展示。
+- `progress.md`：仅在末尾追加本轮优化、验证、文件清单与回滚说明。
+- 回滚方式：执行 `git restore -- src/pages/GraphsPage.tsx src/styles/graphs.css tests/frontend/graphs-page.test.tsx docs/知识图谱.md progress.md` 可撤销本轮优化；本轮未新增数据库迁移，真实数据无需回滚。
+
+## 2026-08-01 - Task: 图谱自定义节点与层级思维导图
+
+### What was done
+
+- 新增图谱节点扩展迁移，支持不绑定卡片的自定义知识点，并保存标题、正文、层级和球面坐标。
+- 将图谱编辑态改为按层级分列的 2D 思维导图，用户可直接添加自定义知识点，也可继续从卡片库拖入卡片。
+- 修复 2D 节点拖动吸附错位问题，拖动时保留按下位置相对节点中心的偏移，松手后按所在层级保存。
+- 将 3D 预览改为红色系层级展示，节点大小由层级和连接数共同决定，关系强度由关系标签和层级差共同决定。
+- 统一默认层级规则：自定义节点未指定层级时默认第 1 层，卡片节点和旧版图谱节点默认第 2 层。
+
+### Testing
+
+- `npm run typecheck`：通过，前端与服务端 TypeScript 检查无错误。
+- `npx vitest run tests/frontend/graphs-page.test.tsx tests/server/knowledge-maps.test.ts tests/server/database.test.ts tests/server/backups.test.ts tests/server/card-folders.test.ts`：通过，5 个测试文件、96 项测试全部通过。
+- `npm test`：通过，43 个测试文件、594 项测试全部通过。
+- `npm run build`：通过，客户端与服务端生产构建成功；客户端主包仍有 3D/WebGL 依赖导致的大包非阻塞提示。
+- Playwright 真实生产服务验证：使用临时数据库打开 `/graphs`，创建默认图谱后新增 2 个自定义节点和 1 条关系；拖动节点后层级从 3 变为 6；桌面 1440×900 与移动 390×844 视口下页面均保持一屏；图谱区域截图像素检查通过，桌面红色像素 1151，移动红色像素 231；控制台无应用错误，仅有 Playwright 截图触发的 WebGL `ReadPixels` 性能警告。
+- Playwright 截图位置：`C:\Users\ROG\AppData\Local\Temp\gongkao-graphs-e2e-output\graphs-desktop.png`、`C:\Users\ROG\AppData\Local\Temp\gongkao-graphs-e2e-output\graphs-mobile.png`、`C:\Users\ROG\AppData\Local\Temp\gongkao-graphs-e2e-output\graphs-desktop-canvas.png`、`C:\Users\ROG\AppData\Local\Temp\gongkao-graphs-e2e-output\graphs-mobile-canvas.png`。
+
+### Notes
+
+- `shared/contracts.ts`：扩展图谱节点契约，支持可空 `cardId`、自定义标题正文、层级和节点创建/更新输入。
+- `server/db/migrations.ts`：注册第 7 号知识图谱节点扩展迁移。
+- `server/db/migrations/007_knowledge_map_custom_nodes.sql`：重建图谱节点和关系表，增加自定义节点字段、层级约束和兼容旧节点的默认层级。
+- `server/knowledgeMaps/repository.ts`：支持可空卡片节点、自定义节点字段、层级持久化和节点详情更新。
+- `server/knowledgeMaps/service.ts`：返回自定义节点 `card: null`，并统一节点层级默认值与校验。
+- `server/knowledgeMaps/routes.ts`：放开自定义节点创建和节点详情更新参数，并拒绝完全空的自定义节点。
+- `src/pages/GraphsPage.tsx`：实现 2D 思维导图编辑、自定义知识点表单、拖动偏移修复、按层级投影 3D 红色预览和关系强度计算。
+- `src/styles/graphs.css`：新增 2D 层级导轨、自定义知识点表单、红色节点、关系标签和详情编辑样式。
+- `tests/frontend/graphs-page.test.tsx`：覆盖自定义节点、卡片拖入层级、2D 拖动保存、关系创建和 3D 红色层级显示。
+- `tests/server/database.test.ts`：覆盖迁移版本、节点扩展字段、层级约束和 v6 到 v7 升级兼容。
+- `tests/server/knowledge-maps.test.ts`：覆盖自定义节点创建更新、空节点拒绝、层级校验、关系和卡片删除级联。
+- `tests/server/backups.test.ts`：同步当前迁移版本断言。
+- `tests/server/card-folders.test.ts`：同步当前迁移版本断言。
+- `docs/知识图谱.md`：更新图谱使用说明、2D 编辑、3D 预览、层级关系和迁移说明。
+- `progress.md`：仅在末尾追加本轮实现、验证、文件清单与回滚说明。
+- 回滚方式：执行 `git restore -- shared/contracts.ts server/db/migrations.ts server/knowledgeMaps/repository.ts server/knowledgeMaps/service.ts server/knowledgeMaps/routes.ts src/pages/GraphsPage.tsx src/styles/graphs.css tests/frontend/graphs-page.test.tsx tests/server/database.test.ts tests/server/knowledge-maps.test.ts tests/server/backups.test.ts tests/server/card-folders.test.ts docs/知识图谱.md progress.md` 恢复已跟踪文件，并删除 `server/db/migrations/007_knowledge_map_custom_nodes.sql`。如果真实数据库已执行版本 7，先备份数据库，再还原到执行版本 7 前的备份；旧结构无法保留不绑定卡片的自定义节点。
+
+## 2026-08-01 - Task: 修复图谱添加失败与树形编辑
+
+### What was done
+
+- 修复自定义知识点正文为空时添加失败的问题，前端现在发送空字符串，不再发送 `null`。
+- 左侧新增当前图谱重命名表单，调用已有图谱重命名接口，并保留重名和空名称错误提示。
+- 将 2D 编辑态从自由分层圆点改为树形思维导图视觉：节点按层级横向展开，关系线以分叉曲线连接，节点改为圆角条目样式。
+- 自定义知识点默认层级调整为第 1 层，更符合树形思维导图从根节点开始搭建的用法。
+- 更新知识图谱文档，补充重命名、空正文自定义节点和 2D 树形思维导图说明。
+
+### Testing
+
+- `npm run typecheck`：通过，前端与服务端 TypeScript 检查无错误。
+- `npx vitest run tests/frontend/graphs-page.test.tsx tests/server/knowledge-maps.test.ts tests/server/database.test.ts`：通过，3 个测试文件、30 项测试全部通过。
+- `npm test`：通过，43 个测试文件、596 项测试全部通过。
+- `npm run build`：通过，客户端与服务端生产构建成功；客户端主包仍有 3D/WebGL 依赖导致的大包非阻塞提示。
+- Playwright 真实生产服务验证：使用临时数据库打开 `/graphs`，新建图谱后重命名为“数量关系图谱”；进入编辑态后添加标题为“数量关系”、正文为空、层级为 1 的自定义节点；页面没有出现添加失败提示；接口返回节点 `content: ""`、`level: 1`、`cardId: null`；桌面和移动视口均能看到 2D 树形节点。
+- Playwright 截图位置：`C:\Users\ROG\AppData\Local\Temp\gongkao-graphs-fix-e2e-output\graphs-tree-desktop.png`、`C:\Users\ROG\AppData\Local\Temp\gongkao-graphs-fix-e2e-output\graphs-tree-mobile.png`。
+
+### Notes
+
+- `src/pages/GraphsPage.tsx`：修复空正文创建请求，新增图谱重命名表单与逻辑，改造 2D 编辑点位和连线为树形思维导图布局。
+- `src/styles/graphs.css`：新增重命名表单样式，调整 2D 编辑区背景、关系线和节点为树形导图视觉。
+- `tests/frontend/graphs-page.test.tsx`：覆盖图谱重命名、空正文自定义知识点添加和树形编辑平面。
+- `docs/知识图谱.md`：同步重命名、空正文自定义节点和树形 2D 编辑说明。
+- `progress.md`：仅在末尾追加本轮修复、验证、文件清单与回滚说明。
+- 回滚方式：执行 `git restore -- src/pages/GraphsPage.tsx src/styles/graphs.css tests/frontend/graphs-page.test.tsx docs/知识图谱.md progress.md` 可撤销本轮修复；本轮未新增数据库迁移，真实数据无需结构回滚。
+
+## 2026-08-02 - Task: 修复刷新后图谱节点添加失败并简化树形图谱控件
+
+### What was done
+
+- 定位刷新后仍提示“知识点添加失败”的直接原因：`8787` 端口运行的是旧的 `dist-server/index.js` 生产进程，浏览器刷新仍命中旧构建，旧构建会拒绝自定义知识点新增请求。
+- 重新执行生产构建并重启 `8787` 服务，新进程已加载包含自定义知识点修复的新构建。
+- 进一步兼容后端节点创建参数，允许自定义节点正文为空字符串或 `null`，但仍拒绝标题和正文都为空的无效知识点。
+- 将图谱编辑收敛为树形思维导图：移除顶部“层级 / 关系 / 掌握”切换和“居中”按钮，移除右侧“关系”页签、关系标签编辑、关系删除入口和详情中的手动层级输入。
+- 分支关系改为纯自动维护：选中父节点后添加知识点或卡片会自动生成父子分支，2D 分支线只展示和高亮，不再作为可编辑关系按钮。
+
+### Testing
+
+- `npm run typecheck`：通过，前端与服务端 TypeScript 检查无错误。
+- `npm test -- tests/frontend/graphs-page.test.tsx`：通过，12 项图谱前端测试全部通过，覆盖旧控件移除、自定义节点添加、卡片分支添加和分支线展示。
+- `npm test -- tests/server/knowledge-maps.test.ts`：通过，5 项图谱服务端测试全部通过，覆盖空正文、`null` 正文和空节点拒绝。
+- `npm run build`：通过，客户端与服务端生产构建成功；客户端主包仍有 3D/WebGL 依赖导致的大包非阻塞提示。
+- `npm test`：通过，43 个测试文件、599 项测试全部通过。
+- `8787` 生产服务接口验证：新构建启动后，直接调用 `/api/knowledge-maps/:id/nodes` 成功创建标题为“刷新后新增节点”的自定义知识点，返回 `nodeCount: 1`。
+- Playwright 真实浏览器验证：打开 `http://127.0.0.1:8787/graphs` 后刷新页面，再进入编辑模式添加“刷新后可添加”；页面显示“已保存”，没有出现“知识点添加失败，请稍后重试”；接口回读确认节点已写入；页面只保留右侧“搜索 / 详情”页签，旧的“层级 / 关系 / 掌握 / 居中”按钮均不存在。
+- 清理验证数据：已删除本轮创建的临时诊断图谱，`8787` 当前仅保留用户原有图谱。
+
+### Notes
+
+- `server/knowledgeMaps/routes.ts`：兼容自定义节点 `content: null`，避免空正文经过接口校验时被误拒绝；该文件由并行后端智能体在限定范围内修改并由主流程复验。
+- `tests/server/knowledge-maps.test.ts`：补充空正文、`null` 正文和完全空节点的服务端回归测试。
+- `src/pages/GraphsPage.tsx`：移除旧视图切换、居中按钮、关系编辑入口、关系选择状态和详情层级输入，固定使用树形分支编辑与层级红色 3D 预览。
+- `src/styles/graphs.css`：删除旧视图模式、图例和关系编辑样式，调整分支线标签为不可点击展示态。
+- `tests/frontend/graphs-page.test.tsx`：更新图谱前端测试，断言旧控件不存在，并覆盖分支线仅展示、高亮和不可编辑。
+- `docs/知识图谱.md`：同步新版树形分支规则，删除关系面板、居中按钮和手动层级编辑说明。
+- `progress.md`：仅在末尾追加本轮根因、验证、文件清单与回滚说明。
+- 回滚点：若只撤销本轮并保留前序图谱功能，回到上一条 `2026-08-01 - Task: 修复图谱添加失败与树形编辑` 记录对应状态；当前图谱相关文件仍未纳入 git 跟踪，需通过编辑器本地历史或备份恢复上述图谱文件到该回滚点。若要撤销整个未跟踪图谱功能，再按前序图谱功能记录删除对应未跟踪文件并还原已跟踪入口文件。
+
+## 2026-08-02 - Task: 优化知识图谱径向思维导图与节点添加稳定性
+
+### What was done
+
+- 修复刷新后仍可能添加节点失败的问题：服务启动迁移后会检查 `knowledge_map_nodes` 真实表结构，发现旧结构时自动补执行自定义节点扩展迁移。
+- 修复 2D 思维导图节点被鼠标选中或拖动时错位的问题：节点不再使用会覆盖定位位移的通用按压类，拖动坐标统一按可滚动画布计算。
+- 将 2D 思维导图从固定横向层级栏改为中心向外扩展的径向树形布局，画布支持上下左右滚动，层级较深或节点较多时自动扩大。
+- 将 3D 预览改为按 2D 树形结构投影：第一层节点位于圆心，后续层级按父子分支向外扩充。
+- 为绑定卡片的节点新增 3D 临时 AI 衍生小节点，用于承载整理稿、解析、速记和拓展；这些小节点不写入数据库，也不参与 2D 编辑。
+- 右侧卡片搜索结果和 2D 节点标题改为只显示用户初始稿，不再把 AI 整理稿、解析、速记铺到 2D 编辑视图中。
+- 鼠标悬停某个知识点时，高亮该节点及其所有下级子点，而不只高亮直接相连的一级邻点。
+
+### Testing
+
+- `npm run typecheck`：通过，前端与服务端 TypeScript 检查无错误。
+- `npm test -- tests/server/knowledge-maps.test.ts`：通过，6 项知识图谱服务端测试全部通过，覆盖旧表结构修复后继续新增自定义节点和卡片节点。
+- `npm test -- tests/frontend/graphs-page.test.tsx`：通过，12 项图谱前端测试全部通过，覆盖用户初始稿展示、可滚动径向画布、拖动偏移、子树高亮、3D 外扩坐标和 3D AI 衍生小节点。
+- `npm test`：通过，43 个测试文件、600 项测试全部通过。
+- `npm run build`：通过，客户端与服务端生产构建成功；客户端主包仍有 3D/WebGL 依赖导致的大包非阻塞提示。
+- Playwright 真实生产服务验证：重启 `8787` 后打开 `/graphs`，创建临时图谱并新增根节点和子分支；页面没有出现添加失败提示；2D 画布 `704×684` 视口内生成 `2460×2460` 可滚动世界；悬停根节点同时高亮根节点和子分支；3D 预览 canvas 截图像素检查通过，非白像素 `171805`、红色像素 `1449`；移动 `390×844` 视口下图谱区域尺寸正常；控制台无应用错误。
+- 临时验证图谱已通过接口清理，复查没有残留 `codex-graph-check-*` 图谱。
+
+### Notes
+
+- `server/db/migrations.ts`：新增迁移后表结构自检，修复迁移版本已记录但节点表仍为旧结构的真实数据库状态。
+- `tests/server/knowledge-maps.test.ts`：新增旧版节点表结构回归用例，验证修复后自定义节点和卡片节点都能继续新增。
+- `src/pages/GraphsPage.tsx`：统一 2D 径向树形坐标、3D 中心外扩坐标、拖动偏移计算、用户初始稿标题、3D AI 衍生小节点和子树高亮逻辑。
+- `src/styles/graphs.css`：将 2D 编辑区改为可滚动大画布和同心层级提示，补充节点高亮、弱化和按压定位样式。
+- `tests/frontend/graphs-page.test.tsx`：更新图谱前端断言，覆盖用户初始稿展示、滚动画布、节点不再错位、子树高亮和 3D 层级半径。
+- `docs/知识图谱.md`：同步径向树形编辑、右侧卡片显示收敛、子树高亮、3D 层级外扩和 3D AI 衍生小节点说明。
+- `progress.md`：仅在末尾追加本轮修复、验证、文件清单与回滚说明。
+- 回滚方式：若只撤销本轮后端兼容修复，执行 `git restore -- server/db/migrations.ts tests/server/knowledge-maps.test.ts progress.md`；若只撤销本轮前端图谱优化，由于 `src/pages/GraphsPage.tsx`、`src/styles/graphs.css`、`tests/frontend/graphs-page.test.tsx`、`docs/知识图谱.md` 当前仍未纳入 git 跟踪，需使用编辑器本地历史或上一条进度记录对应状态回退这些文件。若撤销整个图谱功能，按前序图谱记录还原已跟踪入口文件并删除未跟踪的图谱页面、样式、迁移、服务端模块和测试文件；真实数据库如已执行图谱迁移，需先备份再恢复到迁移前数据库备份。
+
+## 2026-08-02 - Task: 修复 3D 图谱悬浮归位并增强 2D 思维导图画布
+
+### What was done
+
+- 修复 3D 预览中悬浮或选中节点后视角定期归位的问题：自动自转和初始居中都会识别当前悬浮、选中或关系预览状态，用户正在查看节点时不再强制拉回默认轨道。
+- 点击 3D 空白区域会释放当前选中节点并回到搜索面板，之后才恢复自动自转。
+- 2D 树形思维导图支持在空白画布按住鼠标拖动平移；节点拖动仍只移动节点并保存节点坐标，不会与画布平移冲突。
+- 2D 思维导图画布按节点数量、树深和视口尺寸自动扩大，并预留更大的平移缓冲区，减少多节点或深层级时被固定画布边界卡住的问题。
+- 右侧卡片库搜索结果改为完整展示用户初始稿内容，保留换行和长文本，不再用 AI 整理稿作为搜索结果正文。
+- 同步更新知识图谱使用说明，补充空白拖动画布、完整初始稿展示和 3D 悬浮/选中暂停自转规则。
+
+### Testing
+
+- `npm test -- tests/frontend/graphs-page.test.tsx`：通过，15 项图谱前端测试全部通过，覆盖 3D 悬浮/选中不触发相机自转归位、2D 空白拖动画布不保存节点位置、右侧卡片库完整显示用户初始稿。
+- `npm run typecheck`：通过，前端与服务端 TypeScript 检查无错误。
+- `npm test`：通过，43 个测试文件、603 项测试全部通过。
+- `npm run build`：通过，客户端与服务端生产构建成功；客户端主包仍有 3D/WebGL 依赖导致的大包非阻塞提示。
+- Playwright 临时生产实例验证：使用临时数据目录启动 `127.0.0.1:8791`，新建图谱和自定义节点后，2D 画布从 `scrollLeft: 620 / scrollTop: 520` 平移到 `710 / 590`；切换预览后 3D canvas 可见，尺寸为 `704 × 760`；控制台没有应用错误，仅有 WebGL `ReadPixels` 性能警告。
+- 临时验证服务和临时数据目录已清理。
+
+### Notes
+
+- `src/pages/GraphsPage.tsx`：新增 3D 预览焦点门禁、2D 空白拖动画布平移逻辑、动态画布扩展计算和完整初始稿展示 helper。
+- `src/styles/graphs.css`：新增 2D 画布平移游标状态，补充右侧卡片结果完整换行显示样式。
+- `tests/frontend/graphs-page.test.tsx`：新增 3D 悬浮/选中、2D 空白拖动画布、右侧初始稿完整展示的回归测试。
+- `docs/知识图谱.md`：同步本轮 2D 画布、3D 预览和右侧卡片库展示规则。
+- `progress.md`：仅在末尾追加本轮修复、验证、文件清单与回滚说明。
+- 回滚方式：本轮未新增数据库迁移、未改真实数据。若只撤销本轮记录，可执行 `git restore -- progress.md`；图谱页面、样式、测试和文档在当前工作区仍属于未跟踪图谱功能文件，需使用编辑器本地历史或上一条进度记录对应状态回退 `src/pages/GraphsPage.tsx`、`src/styles/graphs.css`、`tests/frontend/graphs-page.test.tsx`、`docs/知识图谱.md` 中的本轮改动。
+## 2026-08-02 - Task: 修复图谱右侧卡片库完整展示与 3D AI 衍生小球数量
+
+### What was done
+
+- 修复图谱右侧卡片库数据来源：按卡片库用户初始稿接口拉取所有分页，保持接口返回顺序逐张展示，不在图谱页前端重新排序、合并或截断卡片。
+- 右侧卡片结果继续使用用户初始稿富文本预览，保留换行和原始内容，不再用 AI 整理稿、解析、速记等字段替换或省略初始稿。
+- 修复 3D 智慧图谱的小球生成规则：小球只来自同一初始稿下已经完成 AI 整理且存在整理稿的真实卡片，不再按解析、速记、拓展等字段拆分，也不生成处理中卡片的小球。
+- 补充前端回归测试，覆盖完整分页拉取、同一初始稿多张卡不被省略、3D 小球按实际 AI 衍生卡片数量生成。
+- 同步更新知识图谱使用说明，明确右侧卡片库展示规则和 3D AI 衍生小球来源。
+
+### Testing
+
+- `npm test -- tests/frontend/graphs-page.test.tsx`：通过，16 项图谱前端测试全部通过。
+- `npm run typecheck`：通过，前端与服务端 TypeScript 检查无错误。
+- `npm test`：通过，43 个测试文件、604 项测试全部通过。
+- `npm run build`：通过，客户端与服务端生产构建成功；客户端仍有 3D/WebGL 依赖导致的大包体积非阻塞警告。
+- Playwright 真实生产页面验证：Browser plugin not available，使用普通 Playwright 打开临时生产服务 `http://127.0.0.1:8791/graphs`。临时数据库中 4 张卡全部显示在右侧卡片库，3 张同一初始稿没有被前端合并或省略，换行文本“第二行不能省略”完整存在；桌面 canvas 尺寸为 `704 × 740`，截图采样得到非白像素 `13285`、红色像素 `107`；移动视口 `390 × 844` 下右侧 DOM 仍包含 4 张卡，canvas 尺寸为 `300 × 355`，截图采样得到非白像素 `4886`、红色像素 `18`。
+- Playwright 控制台没有应用错误；仅出现截图/像素检查触发的 WebGL `ReadPixels` 性能警告。
+- 临时生产服务和临时数据库目录已清理；验证截图保留在系统临时目录：`C:\Users\ROG\AppData\Local\Temp\gongkao-graphs-card-library-e2e.png`、`C:\Users\ROG\AppData\Local\Temp\gongkao-graphs-card-library-e2e-mobile.png`。
+
+### Notes
+
+- `src/pages/GraphsPage.tsx`：图谱页右侧卡片库改为完整拉取用户初始稿分页并保存全量卡片集合，3D AI 衍生小球改为按同源 ready 卡片生成。
+- `tests/frontend/graphs-page.test.tsx`：新增右侧卡片库完整分页、不省略同源卡片，以及 3D 小球按实际 AI 衍生数量生成的回归断言。
+- `docs/知识图谱.md`：同步说明右侧卡片库逐张完整展示规则和 3D 小球真实来源。
+- `progress.md`：仅在末尾追加本轮修复、验证和回滚说明。
+- 回滚方式：本轮未新增数据库迁移、未修改真实数据。若只撤销本轮记录，可执行 `git restore -- progress.md`；若撤销本轮功能改动，由于图谱页相关文件仍是未跟踪图谱功能文件，需要使用编辑器本地历史或上一条进度记录对应状态回退 `src/pages/GraphsPage.tsx`、`tests/frontend/graphs-page.test.tsx`、`docs/知识图谱.md` 中的本轮改动。
+
+## 2026-08-02 - Task: 修复知识图谱初始稿展示、3D 衍生节点与分支交互
+
+### What was done
+
+- 右侧卡片库按初始稿来源去重，每份初始稿只显示一次，并完整保留用户输入的全部正文与换行；AI 优化稿、解析和速记不进入该列表。
+- 3D 图谱将 AI 优化稿和解析分别生成为独立小球，并恢复两类临时小球的点击、详情查看与聚焦能力。
+- 2D 编辑模式支持右击节点后选择“添加分支”，直接把目标节点设为父节点并进入新增区域。
+- 选中或悬停节点时，父节点及其他非焦点节点改为可辨识的淡红色，保留图谱上下文。
+
+### Testing
+
+- 测试驱动红灯：新增去重、右键添加分支、AI 优化/解析小球点击与淡红色上下文断言后，修复前稳定失败 3 项；实现后 `npm test -- --run tests/frontend/graphs-page.test.tsx` 通过，17 项图谱前端测试全部通过。
+- `npm run typecheck`：通过，前端与服务端 TypeScript 检查无错误。
+- `npm test -- --run tests/server/knowledge-maps.test.ts tests/frontend/app-shell.test.tsx`：通过，30 项知识图谱服务端与应用入口回归测试全部通过。
+- `npm test -- --run`：通过，43 个测试文件、605 项测试全部通过。
+- `npm run build`：通过，客户端与服务端生产构建成功；客户端仍有既有 3D/WebGL 依赖导致的大包体积非阻塞警告。
+- Playwright 真实本地页面验证：桌面 `1440 × 900` 与移动 `390 × 844` 下 3D 图谱均可见且布局无重叠；canvas 截图采样分别得到彩色像素 `10936`、`1928`，其中红色像素 `154`、`31`，确认画布非空且节点可见。为避免写入用户真实数据，右键菜单的完整选择流程由前端自动化测试验证。
+
+### Notes
+
+- `src/pages/GraphsPage.tsx`：修复初始稿去重、AI 优化与解析小球生成和点击详情、右键添加分支菜单及淡红色非焦点显示。
+- `src/styles/graphs.css`：新增节点右键菜单样式，并保证衍生节点完整内容按原换行显示。
+- `tests/frontend/graphs-page.test.tsx`：补充本轮四项行为的前端回归测试。
+- `docs/知识图谱.md`：同步本轮初始稿列表、3D 小球、右键分支和节点可见性规则。
+- `progress.md`：仅在末尾追加本轮实现、验证、文件清单与回滚说明。
+- 回滚点：本轮未新增数据库迁移、未修改真实业务数据。图谱相关文件仍未纳入 Git 跟踪，不能使用 `git restore` 单独回滚其本轮增量；应通过编辑器本地历史恢复到上一条 `2026-08-02 - Task: 修复图谱右侧卡片库完整展示与 3D AI 衍生小球数量` 记录完成后的状态。若仅撤销本轮日志，可执行 `git restore -- progress.md`。
+
+## 2026-08-02 - Task: 优化知识图谱缩放、摘要、菜单与可见性
+
+### What was done
+
+- 3D 预览只为 AI 优化稿生成可点击小球，解析不再生成独立小球；相机拉近到可阅读距离后，每个真实节点和 AI 优化小球自动浮现短内容摘要。
+- 2D 思维导图支持按住 `Ctrl` 滚动鼠标滚轮缩放，缩放范围限制在 `60%` 至 `160%`，并以鼠标所在位置为缩放锚点。
+- 右侧卡片库将分类标签和完整初始稿正文拆分颜色作用域，正文恢复正常文字颜色；2D 思维导图单独使用纯白背景，不改变页面其他区域。
+- 右键节点菜单支持点击任意其他位置或按 `Escape` 关闭；取消选中或悬停后淡化无关节点的效果，所有节点始终保持自身颜色与可见度。
+
+### Testing
+
+- 测试驱动红灯：新增 AI-only 小球、距离摘要、`Ctrl + 滚轮` 缩放、正文颜色作用域、菜单外部关闭和节点不淡化断言后，修复前稳定失败 4 项。
+- `npm test -- --run tests/frontend/graphs-page.test.tsx`：通过，18 项知识图谱前端测试全部通过。
+- `npm run typecheck`：通过，前端与服务端 TypeScript 检查无错误。
+- `npm run build`：通过，客户端与服务端生产构建成功；客户端仍有既有 3D/WebGL 依赖导致的大包体积非阻塞警告。
+- `git diff --check`：通过，仅有工作树既有 LF/CRLF 转换提示。
+
+### Notes
+
+- `package.json`、`package-lock.json`：将 3D 摘要精灵使用的 `three` 声明为直接运行依赖。
+- `src/three-runtime.d.ts`：为本页实际使用的纹理和精灵 API 提供最小局部类型声明，避免引入会影响全局 Canvas 类型的第三方声明包。
+- `src/pages/GraphsPage.tsx`：实现 AI-only 小球、距离摘要、2D 缩放、菜单关闭、颜色作用域和节点常显逻辑。
+- `src/styles/graphs.css`：收紧分类标签颜色选择器，增加 2D 独立白底，并移除节点淡化样式。
+- `tests/frontend/graphs-page.test.tsx`：新增本轮行为回归断言并更新旧的解析球和淡化预期。
+- `docs/知识图谱.md`：同步本轮 3D、2D、右侧卡片和右键菜单使用规则。
+- `progress.md`：仅在末尾追加本轮实现、验证、文件清单与回滚说明。
+- 回滚方式：本轮未新增数据库迁移、未修改真实业务数据。依赖和局部声明可执行 `npm uninstall three; Remove-Item -LiteralPath 'src\three-runtime.d.ts'` 撤销；当前图谱页面、样式、测试和文档仍属于未跟踪的前序图谱功能文件，其本轮增量应通过编辑器本地历史恢复到上一条进度记录完成后的状态。若仅撤销本轮日志，可执行 `git restore -- progress.md`。
+
+## 2026-08-02 - Task: 支持图谱自定义层级与长按连线
+
+### What was done
+
+- 2D 编辑模式允许卡片节点和自定义节点在第 1 至第 6 层之间直接调整，布局始终使用节点已保存层级；删除父节点后，剩余子节点不再被强制移回根层。
+- 节点支持长按 500 毫秒后拖向另一节点建立关系，拖动过程中显示临时连线；普通短按拖动仍用于移动节点。
+- 2D 图只保留默认分支的关系线，不显示重复的“分支”文字标签；3D 预览关系线改为淡红色细线。
+- 补充服务端回归验证，确认删除父节点只清理相关边，子节点和其自定义层级保持不变。
+
+### Testing
+
+- 测试驱动红灯：新增自定义层级、长按连线、隐藏默认分支标签和 3D 淡红细线断言后，修复前稳定失败 3 项。
+- `npm test -- tests/frontend/graphs-page.test.tsx tests/server/knowledge-maps.test.ts`：通过，27 项知识图谱前后端测试全部通过。
+- `npm test -- tests/server/knowledge-maps.test.ts -t "keeps child nodes and their custom levels when deleting a parent node"`：通过，确认父节点删除后子节点及层级保留。
+
+### Notes
+
+- `src/pages/GraphsPage.tsx`：实现自定义层级布局、长按连线、默认分支标签隐藏和 3D 淡红细线。
+- `src/styles/graphs.css`：补充层级选择器和长按临时连线样式。
+- `tests/frontend/graphs-page.test.tsx`：新增层级、长按连线和 3D 连线回归测试，并同步默认分支标签预期。
+- `tests/server/knowledge-maps.test.ts`：新增删除父节点时保留子节点及其层级的回归测试。
+- `docs/知识图谱.md`：同步层级选择、长按连线、删除稳定性和 3D 连线说明。
+- `progress.md`：仅在末尾追加本轮实现、验证、文件清单与回滚说明。
+- 回滚方式：本轮未新增数据库迁移、未修改真实业务数据。当前图谱页面、样式、测试和文档仍属于未跟踪的前序图谱功能文件，应通过编辑器本地历史恢复到上一条 `2026-08-02 - Task: 优化知识图谱缩放、摘要、菜单与可见性` 记录完成后的状态；若仅撤销服务端测试，可执行 `git clean -f -- tests/server/knowledge-maps.test.ts`，但该命令会删除整个未跟踪测试文件，执行前需确认不再保留此前测试内容。
+
+## 2026-08-02 - Task: 修复 3D 悬停视角重置与摘要遮挡
+
+### What was done
+
+- 3D 图谱在暂停和恢复自转时同步当前相机角度、旋转半径与高度；用户缩放、旋转或悬停节点后，自转从当前视角继续，不再突然跳回固定远景。
+- 近景内容摘要改为不随透视距离放大的屏幕恒定尺寸，并按文字长度紧凑调整；连续放大时摘要框不再随镜头占满画布。
+- 将 2D 拖动回归测试的坐标换算为包含画布滚动偏移的真实客户端坐标，保证全量并行测试稳定验证节点层级保存。
+
+### Testing
+
+- 测试驱动红灯：新增相机轨道保持和摘要屏幕恒定尺寸断言后，修复前分别得到固定半径 `806` 和摘要透视放大的失败结果。
+- `npm test -- tests/frontend/graphs-page.test.tsx tests/server/knowledge-maps.test.ts`：通过，28 项知识图谱前后端测试全部通过。
+- `npm test`：通过，43 个测试文件、610 项测试全部通过。
+- `npm run typecheck`：通过，前端与服务端 TypeScript 检查无错误。
+- `npm run build`：通过，客户端与服务端生产构建成功；客户端仍有既有 3D/WebGL 依赖导致的大包体积非阻塞警告。
+- Playwright 真实本地页面验证：桌面 `1440 × 900` 下正常视角可见淡红色细关系线；连续五次近距离放大后，摘要仍保持小型白色标签，未遮挡画布。验收截图已在确认后清理，未留入项目。
+- `git diff --check`：通过，仅有工作树既有 LF/CRLF 转换提示。
+
+### Notes
+
+- `src/pages/GraphsPage.tsx`：同步自动旋转轨道并将摘要精灵改为屏幕恒定紧凑尺寸。
+- `src/three-runtime.d.ts`：补充摘要精灵关闭距离缩放所需的 `sizeAttenuation` 局部类型。
+- `tests/frontend/graphs-page.test.tsx`：新增相机连续性、摘要尺寸回归断言，并修正 2D 拖动测试坐标。
+- `docs/知识图谱.md`：同步悬停后从当前视角继续自转和摘要不随透视放大的使用规则。
+- `progress.md`：仅在末尾追加本轮实现、验证、文件清单与回滚说明。
+- 回滚方式：本轮未新增数据库迁移、未修改真实业务数据。当前图谱页面、局部类型、测试和文档仍属于未跟踪的前序图谱功能文件，应通过编辑器本地历史恢复到上一条 `2026-08-02 - Task: 支持图谱自定义层级与长按连线` 记录完成后的状态；若仅撤销本轮日志，可从 `progress.md` 末尾删除本节。
+
+## 2026-08-02 - Task: 阻止 2D 图谱 Ctrl 滚轮触发浏览器缩放
+
+### What was done
+
+- 将 2D 思维导图的 `Ctrl + 滚轮` 处理改为画布元素上的非被动原生监听，阻止浏览器默认缩放，同时继续按鼠标位置缩放图谱画布。
+- 普通滚轮行为保持不变，不影响画布滚动和平移。
+- 更新知识图谱使用说明，明确画布内快捷缩放不会改变浏览器页面比例。
+
+### Testing
+
+- 测试驱动红灯：新增非被动滚轮监听断言后，修复前定向测试稳定失败，实际仅存在 React 注册的被动 `wheel` 监听。
+- `npm test -- tests/frontend/graphs-page.test.tsx -t "2D 思维导图只在按住 Ctrl 滚动时缩放"`：通过，1 项目标测试通过、20 项跳过。
+
+### Notes
+
+- `src/pages/GraphsPage.tsx`：为 2D 画布注册可阻止默认行为的非被动滚轮监听，并移除重复的 React 滚轮处理。
+- `tests/frontend/graphs-page.test.tsx`：补充非被动监听注册及画布缩放回归断言。
+- `docs/知识图谱.md`：补充画布内 `Ctrl + 滚轮` 不缩放浏览器的说明。
+- `progress.md`：在末尾追加本轮修复、验证、文件清单与回滚点。
+- 回滚点：恢复到本节之前的工作区状态；撤销时删除 `GraphsPage.tsx` 中 `handleWheel` 对应的 `useEffect`、恢复原 JSX `onWheel`，删除目标测试中的 `addEventListenerSpy` 断言，并将文档说明恢复为“按住 `Ctrl` 并滚动鼠标滚轮可以缩放画布”。
+
+## 2026-08-02 - Task: 解耦节点拖拽与连线并支持删除关系
+
+### What was done
+
+- 修复固定层级节点拖动后回弹：2D 布局读取节点已保存角度，拖动时沿所属层级圆环移动，保存后层级不变且新位置可稳定恢复。
+- 移除长按触发连线的冲突手势；新增独立“连接节点”模式，依次选择起点和目标节点建立关系，`Escape` 或点击空白画布可取消。
+- 在节点右侧详情中列出全部入向和出向连线，并接入现有删除接口，支持逐条删除错误关系而不影响节点。
+- 更新知识图谱使用说明，明确拖拽、连接模式和关系删除操作。
+
+### Testing
+
+- 测试驱动红灯：新增连接模式、固定层级长按拖动和单条连线删除断言后，修复前 3 项测试稳定失败。
+- `npm test -- tests/frontend/graphs-page.test.tsx tests/server/knowledge-maps.test.ts`：通过，28 项知识图谱前后端测试全部通过。
+- `npm run typecheck`：通过，前端与服务端 TypeScript 检查无错误。
+
+### Notes
+
+- `src/pages/GraphsPage.tsx`：持久化节点角度、固定拖拽层级，新增连接节点模式和关系删除调用及详情展示。
+- `src/styles/graphs.css`：新增连接模式工具、起点高亮和详情关系列表样式，删除不再使用的长按临时连线样式。
+- `tests/frontend/graphs-page.test.tsx`：将长按连线回归改为显式连接模式，并补充固定层级拖拽和单条连线删除验证。
+- `docs/知识图谱.md`：同步固定层级拖拽、连接模式和关系删除说明。
+- `progress.md`：在末尾追加本轮实现、验证、文件清单与回滚点。
+- 回滚点：恢复到上一节“阻止 2D 图谱 Ctrl 滚轮触发浏览器缩放”完成后的工作区状态；撤销时恢复长按 500 毫秒连线处理、按释放位置计算层级的拖拽逻辑和树结构默认角度布局，移除“连接节点”工具与详情关系列表，并删除本节对应测试和文档增量。
+
+## 2026-08-02 - Task: 参考 llm_wiki 重构 3D 知识图谱
+
+### What was done
+
+- 参考 `llm_wiki` 的知识图谱视觉层级，将 3D 节点按卡片知识点、AI 优化稿和自定义知识点区分颜色，并按连线数量调整节点尺寸。
+- 将关系线改为淡蓝灰细线，按关系权重调整粗细；AI 优化稿的辅助关系使用琥珀色，减少视觉干扰并保留关系辨识度。
+- 增加图谱放大、缩小、适配视图控制和节点类型图例，移除装饰性轨道，改为浅色点阵画布。
+- 将放大后出现的内容概括改为无底框的小号文字，保留白色描边以兼顾复杂节点区域的可读性。
+
+### Testing
+
+- 测试驱动红灯：新增节点分类配色、连线权重、图谱控制、图例和装饰轨道移除断言后，修复前目标测试稳定失败。
+- `npm test`：通过，43 个测试文件、610 项测试全部通过。
+- `npm run typecheck`：通过，前端与服务端 TypeScript 检查无错误。
+- `npm run build`：通过，客户端与服务端均构建成功；仅保留项目既有的客户端单包超过 500 kB 提示。
+- Playwright 桌面端与移动端验证：2 项交互测试通过；真实按住 `Ctrl` 滚轮后图谱缩放值由 1 变为 1.1，浏览器视口比例和尺寸保持不变。
+- 3D 画布像素检查：705×741 画布采样中检测到 448 个彩色像素和 496 个深色像素，确认节点、连线和文字正常渲染而非空白画布。
+- `git diff --check`：通过，未发现空白错误；仅显示工作区既有的换行符提示。
+
+### Notes
+
+- `src/pages/GraphsPage.tsx`：重构 3D 节点配色、尺寸、关系线、视图控制、图例和概括文字渲染。
+- `src/styles/graphs.css`：调整 3D 画布背景、控制器、图例和概括文字样式，移除装饰轨道样式。
+- `tests/frontend/graphs-page.test.tsx`：补充 3D 图谱视觉规则、控制器、图例和关系权重回归测试。
+- `docs/知识图谱.md`：同步 3D 图谱配色、关系线、视图控制和内容概括说明。
+- `progress.md`：在末尾追加本轮实现、验证、文件清单与回滚点。
+- 回滚点：恢复到上一节“解耦节点拖拽与连线并支持删除关系”完成后的工作区状态；撤销时恢复原 3D 红色节点、红色关系线、装饰轨道和概括文字框，移除图谱缩放控制与图例，并删除本节对应测试和文档增量。
+
+## 2026-08-02 - Task: 重构径向圈层知识图谱并完善撤销与详情联动
+
+### What was done
+
+- 将 2D 图谱调整为纯手动关系编辑：新建普通节点或导入卡片只产生独立节点，长按节点拖向目标节点才建立连线，拖到空白处不产生关系，节点位置统一由径向圈层布局管理。
+- 新增自动重新排布和手动“重新排布”入口；双击普通节点或卡片节点均能在右侧完整回显并编辑标题、正文、层级和关联关系，长文本不会再撑破详情栏。
+- 新增工具栏撤销按钮和 `Ctrl+Z` 快捷键，可撤销本轮节点新增或删除、连线新增或删除以及节点内容修改；输入框内仍保留原生文字撤销。
+- 将 3D 预览改为只读红色星球图谱：核心层节点更大、更深，外层节点依次缩小、变浅，全部关系线使用淡红细线；卡片节点和普通节点采用同一层级规则，AI 优化稿单独生成可点击小球，解析不生成节点。
+- 3D 图谱按中心、球面和外层轨道映射 2D 层级，支持可中断的缓慢自转、旋转开关、拖拽视角、滚轮缩放和自适应 Billboard 摘要；移动端适配视图会自动减少边距。
+- 2D 画布加入低透明度项目背景图、磨砂点阵和玻璃控件，并为减少动态效果与增强对比度偏好提供降级样式。
+
+### Testing
+
+- `npm test -- tests/frontend/graphs-page.test.tsx --reporter=dot`：通过，24 项图谱前端测试全部通过。
+- `npm test -- tests/server/knowledge-maps.test.ts --reporter=dot`：通过，7 项图谱服务端测试全部通过。
+- `npm test -- --reporter=dot`：通过，43 个测试文件、613 项测试全部通过。
+- `npm run typecheck`：通过，前端与服务端 TypeScript 检查无错误。
+- `npm run build`：通过，客户端与服务端均构建成功；仅保留项目既有的客户端单包超过 500 kB 提示。
+- Playwright 桌面端与 390×844 移动端验证：重新排布按钮保持可见，普通节点和卡片节点双击后均正确加载右侧完整详情，页面宽度与视口一致，控制台错误为 0。
+- 3D 画布像素检查：705×741 画布抽样检测到 1249 个非空像素和 145 个红色像素，确认红色节点与关系线正常渲染。
+- `git diff --check`：通过，未发现空白错误；仅显示工作区既有的换行符提示。
+
+### Notes
+
+- `src/pages/GraphsPage.tsx`：重构 2D 径向布局、手动长按连线、完整详情编辑、撤销栈和 3D 红色圈层预览。
+- `src/styles/graphs.css`：增加苹果磨砂画布、红色层级视觉、固定排布按钮、详情长文本约束及无障碍偏好样式。
+- `tests/frontend/graphs-page.test.tsx`：覆盖禁止自动连线、长按连线、自动排布、详情联动、撤销和 3D 红色层级行为。
+- `tests/server/knowledge-maps.test.ts`：补充删除节点时清理直接关联关系但保留其他关系的回归验证。
+- `docs/知识图谱.md`：同步 2D 编辑、撤销、详情联动、3D 预览、数据规则和验收方式。
+- `progress.md`：仅在末尾追加本轮实现、验证、文件清单与回滚说明。
+- 回滚方式：本轮未新增数据库迁移、未修改真实业务数据。恢复 `src/pages/GraphsPage.tsx`、`src/styles/graphs.css`、两份图谱测试和 `docs/知识图谱.md` 到本节开始前的状态，并删除本节日志，即可撤销本轮交互与视觉重构；不要回滚工作区中此前已经存在的知识图谱数据库、接口或其他页面改动。
+
+## 2026-08-03 - Task: 优化图谱分支布局、预览开关、搜索与 Markdown 导出
+
+### What was done
+
+- 将 2D 圈层图调整为按根分支分配扇区的树形排布，子节点始终沿父分支继续向外展开，减少层级错位和连线交叉。
+- 所有关系线保持常显；选中节点时，该节点到第一层祖先的完整路径会加粗发光，其他关系不再被隐藏或弱化。
+- 新增节点和导入卡片前均可选择第 1 至第 6 层；3D 预览增加文字摘要和 AI 衍生球体两个独立开关。
+- 卡片库搜索改为短暂防抖并只请求去重首屏；新增 Markdown 导出，保存完整节点正文、层级和关系。
+
+### Testing
+
+- `npm test -- --reporter=dot`：通过，43 个测试文件、619 项测试全部通过。
+- `npm run typecheck`：通过，前端与服务端 TypeScript 检查无错误。
+- `npm run build`：通过，客户端与服务端构建成功；仅保留项目既有的客户端单包超过 500 kB 提示。
+- Playwright 桌面端验证：2D 分支布局、层级选择、3D 开关和 Markdown 导出入口正常；3D 画布抽样得到 678 个非背景像素，控制台错误为 0。
+
+### Notes
+
+- `src/pages/GraphsPage.tsx`：实现分支扇区布局、祖先路径高亮、层级选择、3D 显示开关、首屏搜索和 Markdown 导出。
+- `src/styles/graphs.css`：补充分支层级、路径高亮、预览开关和降低动态效果样式。
+- `tests/frontend/graphs-page.test.tsx`：补充布局、层级、开关、搜索和导出回归验证。
+- `docs/知识图谱.md`：同步上述图谱操作与验收说明。
+- `progress.md`：仅在末尾追加本轮实现、验证、文件清单与回滚点。
+- 回滚方式：本轮未新增数据库迁移、未修改真实业务数据；恢复上述源码、样式、测试和文档到本节开始前状态，并删除本节日志即可回滚。
+
+## 2026-08-03 - Task: 新增横向思维导图编辑并自动生成 2D 与 3D 预览
+
+### What was done
+
+- 将图谱操作明确拆分为“横向编辑、2D 预览、3D 预览”：横向模式是唯一编辑入口，2D 和 3D 均保持只读。
+- 新增中心主题快捷输入和节点右侧加号；用户提交子节点时，系统创建下一层节点及其父子分支，同级节点可以连续录入。
+- 横向编辑、2D 圈层和 3D 星球共用现有节点与关系数据，横向编辑保存后两种预览立即同步，不增加转换文件或重复数据。
+- 横向树使用从左到右的自动层级排布、绿色曲线和固定尺寸红色磨砂节点；长标题显示摘要，完整内容仍在右侧详情中呈现。
+- 修复真实数据下根节点初次进入时落出可视区的问题；桌面、窄屏和窗口尺寸变化后都会重新将根节点置于合适位置。
+
+### Testing
+
+- `npm test -- tests/frontend/graphs-page.test.tsx --reporter=dot`：通过，33 项图谱前端测试全部通过。
+- `npm test -- --reporter=dot`：通过，43 个测试文件、622 项测试全部通过。
+- `npm run typecheck`：通过，前端与服务端 TypeScript 检查无错误。
+- `npm run build`：通过，客户端与服务端构建成功；仅保留项目既有的客户端单包超过 500 kB 提示。
+- Playwright 桌面端与 390×844 窄屏验证：根节点自动居中、三模式切换正常、2D 编辑表单数量为 0、3D 控制器正常，控制台错误为 0。
+- 3D 画布像素检查：582×455 画布抽样检测到 983 个非背景像素和 155 个红色像素，确认节点与连线正常渲染。
+
+### Notes
+
+- `src/pages/GraphsPage.tsx`：新增横向编辑器、层级树排布、父子快捷录入、根节点自适应居中和编辑/预览权限隔离。
+- `src/styles/graphs.css`：新增横向画布、红色磨砂节点、绿色曲线、模式切换、窄屏与降低动态效果样式。
+- `tests/frontend/graphs-page.test.tsx`：新增横向录入与三视图同步验证，并将原 2D 编辑回归调整为横向编辑和 2D 只读预览语义。
+- `docs/知识图谱.md`：改写为横向编辑、2D 预览和 3D 预览的最新使用说明。
+- `progress.md`：仅在末尾追加本轮实现、验证、文件清单与回滚点。
+- 回滚方式：本轮未新增数据库迁移、未修改真实业务数据；恢复 `src/pages/GraphsPage.tsx`、`src/styles/graphs.css`、`tests/frontend/graphs-page.test.tsx` 和 `docs/知识图谱.md` 到上一节完成后的状态，并删除本节日志即可回滚。
+
+## 2026-08-03 - Task: 重构横向图谱交互与太阳系 3D 预览
+
+### What was done
+
+- 将卡片导入改为横向编辑器内的紧凑搜索入口，移除常驻右侧卡片库和手工层级选择；卡片仍按用户初始稿去重，并可直接加入当前图谱。
+- 扩大横向画布，新增 `Ctrl` 加滚轮定点缩放和空白处按住拖动平移；横向与 2D 节点悬浮时显示完整内容，预览自动限制在窗口内部。
+- 节点点击详情改为底部弹出，并将详情背景提高到接近不透明的浅色磨砂层，避免背景节点和连线干扰正文。
+- 将 3D 预览重绘为太阳系轨道模型：根节点作为中心太阳，普通节点按父子层级进入递增同心轨道，子节点沿父分支方向展开，AI 优化稿作为父星球附近的小陨石。
+- 修复默认相机将轨道压成直线的问题；标签按镜头距离调整，远景隐藏 AI 小陨石摘要、拉近后显示，窄屏使用更短摘要以减少遮挡。
+- 补充 390×844 窄屏纵向布局，图谱列表、工具栏和画布不再横向挤出页面；保留减少动态效果、降低透明度和高对比度适配。
+
+### Testing
+
+- `npm test -- --run`：通过，44 个测试文件、631 项测试全部通过。
+- `npm run typecheck`：通过，前端与服务端 TypeScript 检查无错误。
+- `npm run build`：通过，客户端与服务端构建成功；仅保留项目既有的客户端单包超过 500 kB 提示。
+- Playwright 桌面端验证：横向画布缩放值由 1 变为 1.1，浏览器视口比例保持 1；空白拖动时滚动位置由 0、171 变为 42、196，拖动结束后状态正常释放。
+- Playwright 节点预览验证：右侧边缘悬浮预览最终范围为 1044 至 1424，完整位于 1440 像素桌面视口内；底部详情背景实测为 `rgba(250, 252, 255, 0.984)`，背景不再穿透干扰。
+- Playwright 移动端验证：390×844 视口页面宽度与滚动宽度均为 390，图谱画布为 300×560，无页面水平溢出；控制台错误为 0。
+- 3D 画布截图像素检查：300×561 画布抽样检测到 227 个红色像素、1084 个非浅色像素，亮度范围为 63 至 255，确认太阳、轨道、节点和文字正常渲染。
+- 行尾空白检查：本轮源码、样式、测试和文档未发现行尾空白。
+
+### Notes
+
+- `src/pages/GraphsPage.tsx`：实现横向内嵌卡片搜索、画布缩放和平移、悬浮完整预览、底部详情联动、太阳系 3D 渲染和响应式标签。
+- `src/styles/graphs.css`：扩大图谱工作区，补充搜索弹层、悬浮预览、近不透明详情层、太阳系视觉与桌面和移动端布局。
+- `src/graphs/solarOrbitLayout.ts`：新增可测试的太阳系轨道布局算法，负责太阳、普通行星、父分支方向和 AI 小陨石坐标。
+- `src/three-runtime.d.ts`：补充轨道线、几何体、材质、分组和向量的 Three.js 类型声明。
+- `tests/frontend/graphs-page.test.tsx`：覆盖内嵌搜索、删除层级选择、横向缩放和平移、完整悬浮预览、3D 标签和太阳系层级行为。
+- `tests/frontend/solar-orbit-layout.test.ts`：覆盖轨道半径、默认相机平面、父分支方向、兄弟展开、AI 小陨石和确定性布局。
+- `docs/知识图谱.md`：更新横向编辑、卡片搜索、悬浮和点击预览、2D 预览、太阳系 3D 预览与验收说明。
+- `progress.md`：仅在末尾追加本轮实现、验证、文件清单与回滚说明。
+- 回滚方式：本轮未修改数据库结构和真实业务数据；恢复 `src/pages/GraphsPage.tsx`、`src/styles/graphs.css`、`src/three-runtime.d.ts`、`tests/frontend/graphs-page.test.tsx` 和 `docs/知识图谱.md` 到本节开始前状态，删除 `src/graphs/solarOrbitLayout.ts` 与 `tests/frontend/solar-orbit-layout.test.ts`，并移除本节日志即可回滚。
+
+## 2026-08-03 - Task: 修复横向编辑用户初始稿搜索无响应
+
+### What was done
+
+- 修正横向编辑器搜索浮层的高度参照，避免搜索结果被顶部表单裁成极窄区域；输入关键词后用户初始稿结果可完整显示并滚动查看。
+- 新增样式回归测试，禁止搜索浮层再次使用依赖顶部表单高度的百分比上限。
+
+### Testing
+
+- 先运行新增回归测试并确认失败，修复后 `tests/frontend/liquid-glass-styles.test.ts` 与 `tests/frontend/graphs-page.test.tsx` 共 45 项测试全部通过。
+- `npm run typecheck`：通过，前端与服务端 TypeScript 检查无错误。
+- `npm run build:client`：通过；仅保留项目既有的客户端单包超过 500 kB 提示。
+- Playwright 桌面端验证：搜索浮层由修复前的 26 像素恢复为最多 500 像素；输入“几何”后匹配初始稿完整可见，接口返回 200，控制台错误为 0。
+
+### Notes
+
+- `src/styles/graphs.css`：将横向搜索浮层最大高度改为按浏览器可视区计算。
+- `tests/frontend/liquid-glass-styles.test.ts`：新增搜索浮层不得被父表单百分比高度裁切的回归测试。
+- `progress.md`：仅在末尾追加本轮实现、验证、文件清单与回滚说明。
+- 回滚方式：将 `src/styles/graphs.css` 中搜索浮层最大高度恢复为本节开始前的百分比写法，删除 `tests/frontend/liquid-glass-styles.test.ts` 本轮新增测试，并移除本节日志即可回滚。
+
+## 2026-08-03 - Task: 修复 3D 图谱放大后文字未适配
+
+### What was done
+
+- 修正 3D 标签与镜头距离的缩放方向：镜头拉近时文字同步放大，拉远时适度缩小。
+- 为标签设置最小和最大缩放范围，兼顾远景可见性与近景遮挡控制；普通节点和 AI 优化稿标签使用同一套规则。
+- 补充镜头放大回归测试，并同步更新 3D 预览使用说明。
+
+### Testing
+
+- 新增回归测试先确认失败：相机距离从 900 拉近至 360 后，标签宽度仍保持 0.15；修复后 `tests/frontend/graphs-page.test.tsx` 的 36 项测试全部通过。
+- `npm run typecheck`：通过，前端与服务端 TypeScript 检查无错误。
+- `npm run build:client`：通过；仅保留项目既有的客户端单包超过 500 kB 提示。
+- Playwright 桌面端验证：连续点击两次“放大图谱”后，普通节点与 AI 标签均明显增大，控制台错误为 0。
+
+### Notes
+
+- `src/pages/GraphsPage.tsx`：反转 3D 标签缩放公式，并调整近景与远景尺寸上下限。
+- `tests/frontend/graphs-page.test.tsx`：新增放大后标签增长回归，并将旧的反向缩放断言更新为正确行为。
+- `docs/知识图谱.md`：明确 3D 标签近景放大、远景缩小及尺寸限制规则。
+- `progress.md`：仅在末尾追加本轮实现、验证、文件清单与回滚说明。
+- 回滚方式：恢复 `src/pages/GraphsPage.tsx` 本轮修改的三个标签缩放常量与公式，恢复 `tests/frontend/graphs-page.test.tsx` 本轮新增和调整的断言，恢复 `docs/知识图谱.md` 对应说明，并移除本节日志即可回滚。
+
+## 2026-08-03 - Task: 将卡片搜索移入节点添加弹窗并修复结果滚动
+
+### What was done
+
+- 移除横向编辑顶部只能创建根节点的卡片搜索入口，将搜索能力放入每个节点的子节点添加弹窗。
+- 从搜索结果添加卡片时，按当前父节点的下一层级创建节点，并自动建立父节点到新卡片节点的“分支”关系。
+- 为搜索结果设置独立滚动区域和稳定高度，支持查看完整首屏搜索结果，不会带动画布。
+
+### Testing
+
+- 新增回归测试先确认失败，修复后 `tests/frontend/graphs-page.test.tsx` 的 37 项测试全部通过。
+- `npm run typecheck`：通过，前端与服务端 TypeScript 检查无错误。
+- `npm run build:client`：通过；仅保留项目既有的客户端单包超过 500 kB 提示。
+- Playwright 桌面端验证：节点弹窗内加载 12 条搜索结果，可视高度 320 像素、内容高度 2037 像素；真实鼠标滚轮可将列表从 0 滚动到 900 像素，顶部旧搜索入口数量为 0。
+
+### Notes
+
+- `src/pages/GraphsPage.tsx`：将卡片搜索迁入节点子节点弹窗，并按父节点层级创建卡片子节点和分支关系。
+- `src/styles/graphs.css`：为弹窗内搜索结果增加固定上限、独立纵向滚动和结果摘要截断。
+- `tests/frontend/graphs-page.test.tsx`：新增父子层级与分支回归，并将旧顶部搜索用例更新为节点弹窗搜索语义。
+- `docs/知识图谱.md`：更新卡片搜索入口、滚动方式和父子关系说明。
+- `progress.md`：仅在末尾追加本轮实现、验证、文件清单与回滚说明。
+- 回滚点：恢复上述四个业务、样式、测试和文档文件至本节开始前状态，并删除本节进度记录；本轮未修改数据库结构和真实业务数据。
+## 2026-08-08 - Task: 新增每日 Anki 初始稿卡组与 cc-connect 推送
+
+### What was done
+
+- 每日从未归档且已有可靠 AI 题面的用户初始稿中随机抽取最多 10 条，按完整原始内容去重，避免同一初始稿因衍生多个问题被重复发送。
+- 将抽取结果先整理为中文 Markdown，再生成包含稳定编号、DeepSeek 衍生题面和完整初始稿答案的 Anki `.apkg` 卡组；输出文件按本地日期保存到 `output/anki/`。
+- 补齐 Anki schema 11 的牌组、复习配置、复习日志表和索引，避免仅能解压但无法被 Anki 可靠解析。
+- 新增每日生成服务、命令行入口和本地接口；设置页增加“生成并发送今日 Anki”入口，发送失败时保留已经生成的两个文件。
+- 接入 cc-connect 附件发送，Windows 自动绕过 npm 脚本垫片并启动安装包内原生程序；已全局安装 `cc-connect v1.4.1`。
+- 更新版后端已启动在 `127.0.0.1:8788`，前端开发服务已启动在 `127.0.0.1:5173` 并代理到更新版后端。
+
+### Testing
+
+- 按测试驱动流程先确认日期、Anki 复习日志、官方 schema 关键字段、可靠 AI 题面筛选和 Windows 原生程序解析用例失败，完成修复后对应回归全部通过。
+- `npm test -- --run tests/server/anki-source.test.ts tests/server/anki-apkg.test.ts tests/server/anki-sender.test.ts tests/server/anki-daily.test.ts tests/server/anki-routes.test.ts tests/frontend/settings-page.test.tsx tests/server/health.test.ts`：通过，7 个测试文件、43 项测试全部通过。
+- `npm run typecheck`：通过，前端与服务端 TypeScript 检查无错误。
+- `npm run build`：通过，客户端与服务端构建成功；仅保留项目既有的客户端单包超过 500 kB 提示。
+- `npm test -- --run`：49 个测试文件中 48 个通过，655 项中 654 项通过；唯一失败为既有知识图谱搜索浮层样式断言，与本轮 Anki 文件无交集。
+- 真实本地数据验证：成功生成 10 条去重初始稿、`daily-review-2026-08-08.md` 和 `daily-review-2026-08-08.apkg`；cc-connect 原生程序已成功启动并明确返回后台 socket 尚未运行，生成文件未丢失。
+- 开发服务接口验证：通过 `http://127.0.0.1:5173/api/anki/daily` 生成 10 张卡，健康检查和前端代理均正常。
+
+### Notes
+
+- `.env.example`：补充 Anki 输出目录和 cc-connect 命令配置示例。
+- `package.json`：新增 `anki:daily` 手动生成与发送命令。
+- `server/anki/markdown.ts`：将用户初始稿整理为可追溯的中文 Markdown 中间文档。
+- `server/anki/apkg.ts`：生成符合 Anki schema 11 关键结构的 `.apkg` 卡组。
+- `server/anki/source.ts`：抽取、去重并随机选择带可靠 AI 题面的用户初始稿。
+- `server/anki/sender.ts`：封装 cc-connect 双附件发送、结构化失败结果、超时终止和 Windows 原生程序解析。
+- `server/anki/daily.ts`：编排每日抽取、Markdown 转换、卡组生成、落盘和发送。
+- `server/anki/routes.ts`：新增每日 Anki 本地接口及参数校验。
+- `server/anki/cli.ts`：新增定时任务可调用的命令行入口。
+- `server/config.ts`：读取 Anki 输出目录和 cc-connect 命令配置。
+- `server/app.ts`：允许挂载每日 Anki 路由。
+- `server/index.ts`：在应用启动时组装每日 Anki 服务与发送器。
+- `src/pages/SettingsPage.tsx`：新增立即生成并发送今日 Anki 的设置入口和状态提示。
+- `tests/server/anki-source.test.ts`：覆盖初始稿筛选、分类、去重、随机上限和可靠 AI 题面要求。
+- `tests/server/anki-apkg.test.ts`：覆盖 Markdown 内容、卡组压缩结构、数据库表和官方 schema 关键字段。
+- `tests/server/anki-sender.test.ts`：覆盖附件参数、Windows 原生程序解析、命令失败、缺失和超时。
+- `tests/server/anki-daily.test.ts`：覆盖十张卡落盘、无数据分支和本地日期命名。
+- `tests/server/anki-routes.test.ts`：覆盖每日接口生成、发送和非法参数。
+- `tests/frontend/settings-page.test.tsx`：覆盖设置页生成并发送入口。
+- `tests/server/health.test.ts`：覆盖新增 Anki 环境配置默认值。
+- `docs/anki-cc-connect.md`：记录功能边界、手动命令、定时任务、环境变量和接口使用方式。
+- `progress.md`：仅在末尾追加本轮实现、验证、文件清单与回滚说明。
+- 回滚方式：删除 `server/anki/`、本轮新增的五个 `tests/server/anki-*.test.ts` 和 `docs/anki-cc-connect.md`，恢复 `.env.example`、`package.json`、`server/config.ts`、`server/app.ts`、`server/index.ts`、`src/pages/SettingsPage.tsx`、`tests/frontend/settings-page.test.tsx` 与 `tests/server/health.test.ts` 中本轮 Anki 相关片段，并移除此节日志；如需同时移除外部工具，执行 `npm uninstall -g cc-connect`。本轮未修改数据库结构或用户数据，`output/anki/` 已被 Git 忽略。
+## 2026-08-08 - Task: 设计卡片库 Anki 导出历史与启动自动发送
+
+### What was done
+
+- 明确卡片库手动导出的范围规则、独立批次文件、历史回顾和再次下载交互。
+- 明确应用启动后按最近 24 小时成功发送时间决定是否随机发送 1 张卡，并限定只有发送成功才更新时间。
+- 选择文件历史与现有 `app_settings` 方案，不新增数据库表，不改变卡片和复习协议。
+
+### Testing
+
+- 完成设计文档占位符、内部一致性、范围和歧义自检；未发现 `TBD`、`TODO` 或未决实现项。
+- 本轮仅新增正式设计文档和进度记录，尚未修改业务代码，因此未运行代码测试。
+
+### Notes
+
+- `docs/superpowers/specs/2026-08-08-Anki导出与自动发送设计.md`：记录导出范围、历史文件、接口、卡片库交互、24 小时发送判定和验收标准。
+- `progress.md`：仅在末尾追加本轮设计交付、检查结果、文件清单与回滚说明。
+- 回滚方式：删除本轮设计文档并移除此节进度记录；本轮未修改业务代码、数据库结构或用户数据。
+## 2026-08-08 - Task: 编制 Anki 导出与自动发送实施计划
+
+### What was done
+
+- 将已批准规格拆成通用数据源、导出历史服务、24 小时自动发送、接口组装、卡片库交互和验证记录六个可执行任务。
+- 明确并行代理的独立文件责任和共享入口单写规则，避免并行修改冲突。
+- 为每项行为规定测试先行的红灯、最小实现和绿灯验证命令。
+
+### Testing
+
+- 完成实施计划的规格覆盖、占位符、类型命名和任务依赖自检；规格中的导出范围、历史回顾、再次下载、24 小时判定、成功后记录和文件隔离均有对应任务。
+- 本轮仅新增实施计划和进度记录，尚未修改业务代码，因此未运行代码测试。
+
+### Notes
+
+- `docs/superpowers/plans/2026-08-08-Anki导出与自动发送实施计划.md`：记录六项测试驱动施工任务、文件责任、接口和验证命令。
+- `progress.md`：仅在末尾追加本轮计划交付、检查结果、文件清单与回滚说明。
+- 回滚方式：删除本轮实施计划并移除此节进度记录；本轮未修改业务代码、数据库结构或用户数据。
+
+## 2026-08-08 - Task: 完成卡片库 Anki 导出历史与启动自动发送
+
+### What was done
+
+- 在卡片库增加“导出 Anki”和“导出记录”：有勾选时仅导出选中初始稿，无勾选时导出全部合格初始稿；成功后立即下载 `.apkg`。
+- 为每次手动导出保存独立批次，可在底部白色玻璃面板查看题面、分类和完整初始稿答案，并再次下载历史卡组。
+- 应用服务每次启动后异步检查最近一次成功发送时间；不足 24 小时跳过，否则随机生成并通过 cc-connect 发送 1 张，只有发送成功才更新时间。
+- 自动发送文件使用本地时间和独立短编号，避免同秒重启覆盖；异常未来时间不再阻止发送。
+- 历史面板补齐键盘焦点循环、关闭后焦点恢复、滚动条宽度补偿、底部弹簧进入动效和减少动态效果适配。
+- 复用现有 `app_settings` 保存成功时间，未新增数据库表或迁移；导出文件继续保存在 Git 忽略目录。
+
+### Testing
+
+- 测试驱动红灯已覆盖通用初始稿选择、导出历史服务、24 小时门禁、导出接口、界面导出与回顾，以及审查发现的未来时间、同秒文件覆盖、焦点逃逸、页面横移、动效和选中数量问题。
+- `npm test -- --run tests/server/anki-source.test.ts tests/server/anki-library-exports.test.ts tests/server/anki-daily.test.ts tests/server/anki-auto-send.test.ts tests/server/anki-routes.test.ts tests/frontend/cards-page.test.tsx`：通过，6 个测试文件、98 项测试全部通过。
+- `npm run typecheck`：通过，前端与服务端 TypeScript 检查无错误。
+- `npm run build`：通过，客户端与服务端生产构建成功；仅保留项目既有的客户端单包超过 500 kB 提示。
+- `npm test -- --run`：51 个测试文件中 50 个通过，686 项中 685 项通过；唯一失败仍为既有 `横向图谱搜索浮层使用视口高度而不会被顶部表单裁切` 样式断言，与本轮 Anki 文件无交集。
+- 真实本地数据闭环：创建 1 个包含 63 张去重初始稿的批次，历史摘要、63 条完整非空答案和 `.apkg` 下载均验证成功，下载响应为 200、文件大小 151770 字节。
+- 运行中服务验证：启动后自动发送检查已实际执行；当前 cc-connect 后台未运行时返回未完成，服务仍正常监听，不写成功时间。
+- `git diff --check`：通过；`output/anki/` 及其历史导出文件由 `.gitignore` 排除。
+- 多智能体最终只读质量审查通过，未发现 P1/P2 阻断问题。
+
+### Notes
+
+- `server/anki/source.ts`：增加指定卡片或全部卡片的非随机去重初始稿选择能力。
+- `server/anki/libraryExports.ts`：新增手动导出批次的创建、列表、详情和安全下载路径服务。
+- `server/anki/daily.ts`：允许自动发送使用独立且受控的文件名前缀。
+- `server/anki/autoSend.ts`：新增 24 小时成功发送门禁、并发合并、未来时间处理和唯一短编号。
+- `server/anki/routes.ts`：增加卡片库导出创建、历史列表、详情与下载接口。
+- `server/index.ts`：组装导出服务，并在服务监听后异步执行自动发送检查。
+- `src/pages/CardsPage.tsx`：增加 Anki 导出按钮、选中数量、历史回顾面板和完整交互状态。
+- `src/styles/cards-glass.css`：增加白色底部历史面板、响应式布局、弹簧进入和减少动态效果样式。
+- `tests/server/anki-source.test.ts`：覆盖指定编号和非随机顺序。
+- `tests/server/anki-library-exports.test.ts`：覆盖批次创建、历史读取、完整答案、损坏元数据和安全下载。
+- `tests/server/anki-daily.test.ts`：覆盖受控自动文件前缀且保持每日默认命名。
+- `tests/server/anki-auto-send.test.ts`：覆盖 24 小时门禁、成功与失败落点、并发、未来时间和同秒唯一文件名。
+- `tests/server/anki-routes.test.ts`：覆盖导出创建、列表、详情、下载、非法参数和缺失记录。
+- `tests/frontend/cards-page.test.tsx`：覆盖导出范围、自动下载、历史回顾、错误状态、关闭方式、焦点、滚动补偿和动效。
+- `docs/anki-cc-connect.md`：补充卡片库导出、历史目录、启动发送规则和接口说明。
+- `progress.md`：仅在末尾追加本轮实现、验证、文件清单与回滚说明。
+- 回滚方式：恢复上述业务、测试和文档文件至本节开始前状态，并删除本节进度记录；可删除 `ANKI_OUTPUT_DIR/exports/` 清理本轮本地导出产物。无需回滚数据库迁移；若需清除自动发送时间，仅删除 `app_settings` 中键 `anki_last_successful_send_at`。
+
+## 2026-08-08 - Task: 修复 Anki 导出报错并启动 cc-connect
+
+### What was done
+
+- 定位到用户访问的旧 `127.0.0.1:8787` 仍运行旧生产构建，`POST /api/anki/exports` 返回 404；已重新构建并重启当前生产服务，保留原端口可用。
+- 为 cc-connect 发送器增加可选数据目录参数，项目现在可以连接已运行的 `D:\cc-connect\cc-connect-data` API socket，不再误用默认空配置目录。
+- 本地环境增加 `CC_CONNECT_DATA_DIR`，示例文档同步说明；DeepSeek 密钥未输出、未写入新文件、未进入提交范围。
+- 启动并验证本机 cc-connect v1.4.1 进程及其 API socket，未发送额外测试消息。
+
+### Testing
+
+- 先复现红灯：新增数据目录参数测试和配置测试分别因参数未传递、配置字段不存在而失败。
+- `npm test -- --run tests/server/anki-sender.test.ts tests/server/health.test.ts tests/server/anki-daily.test.ts tests/server/anki-auto-send.test.ts tests/server/anki-routes.test.ts`：通过，5 个测试文件、43 项测试全部通过。
+- `npm run typecheck`：通过。
+- `npm run build:server`：通过。
+- `git diff --check`：通过。
+- 真实端口验证：`http://127.0.0.1:8787/cards` 返回 200，`POST http://127.0.0.1:8787/api/anki/exports` 返回 201 并生成 63 张卡片导出批次；8788 和 5173 也保持可用。
+- cc-connect 验证：v1.4.1 进程响应正常，`D:\cc-connect\cc-connect-data\run\api.sock` 存在，历史微信会话可读取；未发送额外测试消息。
+
+### Notes
+
+- `.env.example`：增加 `CC_CONNECT_DATA_DIR` 示例。
+- `server/config.ts`：读取并解析 cc-connect 数据目录。
+- `server/anki/sender.ts`：向 `cc-connect send` 注入受控 `--data-dir` 参数。
+- `server/index.ts`：将数据目录传入发送器。
+- `tests/server/anki-sender.test.ts`：覆盖数据目录参数映射。
+- `tests/server/health.test.ts`：覆盖数据目录配置读取。
+- `docs/anki-cc-connect.md`：补充数据目录配置说明。
+- `progress.md`：仅在末尾追加本轮故障定位、修复、验证和回滚说明。
+- `.env`：仅增加本机 cc-connect 数据目录配置；该文件已被 Git 忽略，保留原有密钥内容不变。
+- 回滚方式：恢复上述代码、测试和文档文件至本节开始前状态并移除此节日志；删除 `.env` 中新增的 `CC_CONNECT_DATA_DIR` 行即可恢复原本地发送配置。旧 8787 进程若需回滚，可停止当前 `dist-server/index.js` 后启动原构建。
+
+## 2026-08-08 - Task: 验证 cc-connect 活动会话边界
+
+### What was done
+
+- 使用真实生成的单卡文件验证 cc-connect 附件发送参数，确认数据目录已正确连接到 D 盘 API socket。
+- 发现当前 cc-connect 只有历史微信会话、没有活动会话；CLI 明确返回 `no active session found`，未把该外部状态误记为项目发送成功。
+- 保持 cc-connect 前台连接进程运行，平台日志已进入 `platform ready`；项目下次启动或手动发送会继续使用已生成文件。
+
+### Testing
+
+- `cc-connect send --data-dir D:\\cc-connect\\cc-connect-data --help`：确认当前版本支持重复 `--file`、`--message` 和 `--data-dir`。
+- 真实单卡发送诊断：返回结构化 `COMMAND_FAILED/no active session found`，未发送错误消息，未丢失 Anki 文件。
+- `GET http://127.0.0.1:8787/cards`：200；历史 `.apkg` 下载：200。
+
+### Notes
+
+- `docs/anki-cc-connect.md`：明确发送必须存在活动会话，历史会话不足以直接发送。
+- `progress.md`：仅在末尾追加本轮外部依赖验证和回滚说明。
+- 回滚方式：删除本节日志即可；不需要回滚代码或数据库。保持 cc-connect 运行状态不影响项目数据，停止它可执行 `taskkill /PID 28356 /F`。
+
+## 2026-08-08 - Task: 将每日 Anki 自动发送数量调整为三个初始稿
+
+### What was done
+
+- 将应用启动后的每日自动发送数量从 1 个用户初始稿调整为 3 个，继续沿用随机抽取和 Anki 卡组生成流程。
+- 保留原有 24 小时防重复门禁；只有 cc-connect 明确发送成功后才更新最近成功时间。
+- 同步更新自动发送说明，手动导出数量和其他 Anki 功能保持不变。
+
+### Testing
+
+- 测试驱动红灯：修改期望后，`tests/server/anki-auto-send.test.ts` 的 8 个发送场景均因“期望 3、实际 1”失败，确认测试命中目标行为。
+- `npm test -- --run tests/server/anki-auto-send.test.ts`：通过，12 项测试全部通过。
+- `npm test -- --run tests/server/anki-auto-send.test.ts tests/server/anki-daily.test.ts tests/server/anki-source.test.ts tests/server/anki-sender.test.ts`：通过，4 个测试文件、30 项测试全部通过。
+- `npm run typecheck`：通过。
+- `npm run build:server`：通过。
+- 生产服务重启验证：`http://127.0.0.1:8787/api/health` 返回 200；最近成功时间保持为 `2026-08-08T05:38:46.978Z`，证明 24 小时内未重复发送。
+
+### Notes
+
+- `server/anki/autoSend.ts`：将自动发送服务的每日抽取数量改为 3。
+- `tests/server/anki-auto-send.test.ts`：更新成功、失败和连续检查场景的数量断言及测试文案。
+- `docs/anki-cc-connect.md`：将启动时自动发送说明更新为随机抽取 3 个用户初始稿。
+- `progress.md`：追加本轮实现、验证、文件清单与回滚说明。
+- 回滚方式：将 `server/anki/autoSend.ts` 的 `generateAndSend(3, ...)` 恢复为 `generateAndSend(1, ...)`，同步恢复测试和文档中的数量，并移除本节进度记录后重新执行 `npm run build:server`、重启服务。
+
+## 2026-08-08 - Task: 为用户初始稿增加单卡 Anki 手机发送
+
+### What was done
+
+- 在用户初始稿卡片的操作区增加单卡发送按钮，点击后直接调用 cc-connect 发送到手机端，并提供发送中、成功和失败状态。
+- 新增按卡片编号生成单张 Anki 卡组的服务参数与路由，不改变批量导出和每日自动发送逻辑。
+- 对非法编号、不可用初始稿和 cc-connect 发送失败分别返回明确错误，不产生数据库结构变更。
+
+### Testing
+
+- 测试驱动红灯：新增单卡发送路由和卡片库交互测试在实现前分别因路由不存在、发送按钮不存在而失败。
+- `npm test -- --run tests/server/anki-routes.test.ts tests/server/anki-daily.test.ts tests/server/anki-auto-send.test.ts tests/server/anki-source.test.ts tests/server/anki-sender.test.ts tests/server/anki-library-exports.test.ts`：通过，6 个测试文件、42 项测试全部通过。
+- `npm test -- --run tests/frontend/cards-page.test.tsx`：通过，69 项测试全部通过。
+- `npm run typecheck`：通过。
+- `npm run build`：通过，客户端和服务端构建成功，仅保留既有客户端包体积提示。
+
+### Notes
+
+- `server/anki/daily.ts`：支持按指定 `cardIds` 生成单卡 Anki 卡组。
+- `server/anki/routes.ts`：新增 `POST /api/anki/cards/:cardId/send` 单卡发送接口。
+- `src/pages/CardsPage.tsx`：用户初始稿卡片增加发送到手机按钮和状态反馈。
+- `tests/server/anki-routes.test.ts`：覆盖单卡发送、非法编号和不可用卡片。
+- `tests/server/anki-daily.test.ts`：覆盖按编号定向生成卡组。
+- `tests/frontend/cards-page.test.tsx`：覆盖卡片按钮调用 cc-connect 发送接口及成功提示。
+- `docs/anki-cc-connect.md`：补充单卡发送接口和使用说明。
+- `progress.md`：追加本轮实现、验证、文件清单与回滚说明。
+- 回滚方式：删除单卡路由及 `DailyAnkiGenerateOptions.cardIds` 定向分支，移除卡片库按钮和对应测试、文档段落后，重新执行 `npm run build` 并重启服务。
+
+## 2026-08-08 - Task: 设计申论答题纸页面
+
+### What was done
+
+- 明确新增独立“申论”页面，侧栏入口位于“复盘”下方，整体延续现有项目并采用克制的 Apple 式材质与交互反馈。
+- 定义每行 25 格、四种字数模板、中英文占格、中文分词、标点避首、每 200 字水印和超限警示规则。
+- 定义普通备注、复盘内部链接、选中文字批注、浅色连接箭头、本地草稿、打印 PDF 和快捷键的完整交互边界。
+- 划分排版逻辑、申论页面、页面样式与共享入口的并行施工责任区，避免多智能体修改同一文件。
+
+### Testing
+
+- 已按用户确认内容检查页面结构、超链接语法、批注与备注共存方式以及快捷键映射。
+- 已完成设计文档占位符、内部一致性、范围和歧义检查；未发现 `TODO`、`TBD` 或未定交付项。
+- 本轮只形成设计文档，尚未修改运行时代码；实现验证将在后续施工任务中执行。
+
+### Notes
+
+- `docs/superpowers/specs/2026-08-08-申论答题纸设计.md`：新增申论页面的产品、交互、排版、批注、打印、快捷键和验证设计。
+- `progress.md`：仅在末尾追加本轮设计、检查证据、文件清单和回滚说明。
+- 回滚方式：删除 `docs/superpowers/specs/2026-08-08-申论答题纸设计.md`，并移除本节进度记录；若设计文档已单独提交，可执行 `git revert --no-edit <设计提交哈希>`。
+
+## 2026-08-08 - Task: 编写申论答题纸实施计划
+
+### What was done
+
+- 将已批准设计拆分为七个按依赖推进的测试驱动任务，覆盖排版、草稿、备注链接、复盘锚点、页面样式、批注箭头、快捷键、路由、文档和最终验证。
+- 明确首轮四个互不冲突的并行责任区，以及页面和共享入口的串行整合顺序。
+- 为每项任务写明准确文件、失败测试、最小接口、验证命令、预期结果和统一提交边界。
+
+### Testing
+
+- 已对照设计文档检查需求覆盖，排版、粘贴、模板、水印、超限、备注、链接、批注、箭头、快捷键、本地草稿、打印和响应式均有实施与验证落点。
+- 已检查计划中的类型名称和跨任务导出接口保持一致，未发现 `TODO`、`TBD`、待定实现或未定义的后续调用名称。
+- 本轮只新增实施计划，尚未修改运行时代码；代码红绿测试将在计划执行阶段逐项产生。
+
+### Notes
+
+- `docs/superpowers/plans/2026-08-08-申论答题纸实施计划.md`：新增可直接执行的七任务测试驱动施工计划和多智能体文件责任边界。
+- `progress.md`：仅在末尾追加本轮计划、检查证据、文件清单和回滚说明。
+- 回滚方式：删除 `docs/superpowers/plans/2026-08-08-申论答题纸实施计划.md` 并移除本节进度记录；若计划文档已单独提交，可执行 `git revert --no-edit <计划提交哈希>`。
+
+## 2026-08-08 - Task: 限制未整理初始稿的无效 Anki 发送
+
+### What was done
+
+- 保留所有用户初始稿的 Anki 发送入口，但对待 AI 整理或已归档卡片禁用按钮，避免点击后产生无效发送请求。
+- 禁用状态补充“完成 AI 整理后可发送”提示，已整理初始稿继续使用 cc-connect 单卡发送流程。
+
+### Testing
+
+- `npm test -- --run tests/frontend/cards-page.test.tsx -t '用户初始稿卡片可以直接通过 cc-connect 发送 Anki 到手机|待整理初始稿保留发送入口但避免触发无效发送'`：通过，2 项测试全部通过。
+- `npm run build`：通过，客户端和服务端构建成功。
+- 生产服务重启验证：`http://127.0.0.1:8787/api/health` 返回 200，非法单卡发送请求返回 400，最近每日发送时间保持不变。
+
+### Notes
+
+- `src/pages/CardsPage.tsx`：为未整理或已归档初始稿增加禁用条件和提示。
+- `tests/frontend/cards-page.test.tsx`：新增待整理初始稿不可触发发送的回归测试。
+- `progress.md`：追加本轮边界修正、验证和回滚说明。
+- 回滚方式：移除发送按钮的 `card.archived` 和 `card.aiStatus` 禁用条件及对应测试、日志即可，不涉及数据库或历史 Anki 文件。
+
+## 2026-08-08 - Task: 单卡 Anki 发送最终回归核对
+
+### What was done
+
+- 完成单卡发送功能的最终卡片库回归和生产服务核对，未发现对既有卡片操作的影响。
+- 保持申论草稿模块的既有问题不变，未扩大本轮任务范围。
+
+### Testing
+
+- `npm test -- --run tests/frontend/cards-page.test.tsx`：通过，70 项测试全部通过。
+- `npm run typecheck`：未通过；仓库既有 `src/shenlun/draft.ts` 2 个类型错误和 `tests/frontend/shenlun-draft-notes.test.ts` 1 个类型不匹配错误，与本轮 Anki 文件无关。
+- Anki 服务单测、卡片库单测、`npm run build` 均已在本轮前后通过；生产健康检查仍返回 200。
+
+### Notes
+
+- `progress.md`：追加最终回归结果和未解决的既有类型检查缺口。
+- 回滚方式：删除本节日志即可；单卡发送功能的回滚点见上一节，申论模块错误需单独处理。
+
+## 2026-08-08 - Task: 新增申论答题纸、批注与备注工作区
+
+### What was done
+
+- 新增“申论”一级页面并接入主导航，支持 200、400、800、1000 字模板、每行 25 格、中文标点避首、英数字符两字符一格、200 字水印和超限淡红提示。
+- 实现剪贴板逐字符填格、普通备注与复盘锚点链接、批注卡片和浅色箭头、本地草稿恢复、独立清空备注以及打印 PDF 保留链接。
+- 增加 Alt 模板切换、组合键粘贴、选区批注、打印和 Esc 取消等快捷键，并补充申论中文使用文档。
+
+### Testing
+
+- `npm test -- --run tests/frontend/shenlun-layout.test.ts tests/frontend/shenlun-draft-notes.test.ts tests/frontend/shenlun-styles.test.ts tests/frontend/shenlun-page.test.tsx tests/frontend/review-page.test.tsx tests/frontend/app-shell.test.tsx`：通过，6 个文件 107 项测试全部通过。
+- `npm run typecheck`：通过。
+- `npm run build`：通过，客户端与服务端构建成功；仅保留既有大包体积提示。
+- 浏览器验证：Chromium 实际访问 `http://127.0.0.1:5183/shenlun`，确认桌面与 390px 窄屏截图、模板切换、200 字水印、备注链接、选区批注和箭头渲染；Playwright CLI 的移动设备预设因本机未安装 WebKit 未执行，已改用 Chromium 窄屏视口完成等价检查。
+- `npm test -- --run`：申论及其他相关测试通过；全量套件仍有仓库既有 `tests/frontend/liquid-glass-styles.test.ts` 图谱搜索样式断言失败，本轮未触碰该模块。
+
+### Notes
+
+- `src/shenlun/layout.ts`：实现 25 格排版、字符/格计数、标点与分词换行、水印和超限数据。
+- `src/shenlun/draft.ts`：实现申论草稿本地存储和批注位置恢复。
+- `src/shenlun/notes.ts`：解析受限的复盘内部链接标记语法。
+- `src/shenlun/selection.ts`：读取答题格文字选区并生成批注定位信息。
+- `src/pages/ShenlunPage.tsx`：新增申论页面状态、粘贴、快捷键、批注和打印入口。
+- `src/components/ShenlunGrid.tsx`：渲染答题格、水印和选区事件。
+- `src/components/ShenlunNotesRail.tsx`：渲染普通备注、链接预览和批注卡片。
+- `src/components/ShenlunConnectors.tsx`：绘制随工作区尺寸更新的浅色批注箭头。
+- `src/styles/shenlun.css`：新增 Apple 风格工作区、网格、备注、批注、响应式和打印样式。
+- `src/App.tsx`、`src/components/AppShell.tsx`：增加申论路由及“复盘”下方导航入口。
+- `src/pages/ReviewPage.tsx`：为复盘条目增加可跳转锚点。
+- `tests/frontend/shenlun-layout.test.ts`、`shenlun-draft-notes.test.ts`、`shenlun-styles.test.ts`、`shenlun-page.test.tsx`：覆盖排版、草稿、样式和页面交互。
+- `tests/frontend/app-shell.test.tsx`、`tests/frontend/review-page.test.tsx`：覆盖新入口和复盘锚点回归。
+- `docs/申论答题纸.md`：记录使用方式、链接语法、快捷键和打印规则。
+- 回滚方式：本轮未提交；删除以上新增申论文件，并仅按本节差异撤销 `src/App.tsx`、`src/components/AppShell.tsx`、`src/pages/ReviewPage.tsx` 及对应测试中的申论入口/锚点改动，保留工作树中的其他用户修改。
+
+## 2026-08-08 - Task: 申论最终回归核验
+
+### What was done
+
+- 将英数字符的实际字符计数与超限判断独立于占用格数，补充换行后闭合标点不跨越原文换行的保护。
+- 移除粘贴失败路径中的临时调试输出，保持页面错误提示可见但不污染控制台。
+
+### Testing
+
+- 申论、复盘锚点和导航相关测试：6 个文件 108 项全部通过。
+- `npm run typecheck`：通过。
+- `npm run build`：通过。
+- 全量测试仍仅报告既有图谱搜索样式断言失败，申论相关测试未失败。
+
+### Notes
+
+- `src/shenlun/layout.ts`：补充实际字符计数和硬换行标点边界。
+- `src/pages/ShenlunPage.tsx`：移除临时粘贴调试输出。
+- `tests/frontend/shenlun-layout.test.ts`：新增英数字符计数和硬换行回归测试。
+- `progress.md`：追加最终核验记录。
+- 回滚方式：保留本轮未提交状态；如需回滚，仅反向应用上述三个文件的本节差异，不触碰其他用户改动。
+
+## 2026-08-09 - Task: 完善申论类 Word 编辑、复盘保存与卡片库回看
+
+### What was done
+
+- 将申论答题纸升级为可在任意方格定位的类 Word 编辑器，支持输入、粘贴、复制、剪切、方向键、全选删除、撤销重做、加粗、下划线、删除线及完整快捷键；修正反向拖选、换行留白定位和移动端输入。
+- 新增标准答案导入、透明玻璃右栏、备注内部链接、批注箭头与上下排序；批注在重复词语、结构空位和横向滚动后保持正确位置。
+- 经用户批准新增独立 `shenlun_reviews` 表及版本 8 迁移，提供列表、详情、新建和原记录更新接口；本地草稿记录复盘编号，保存竞态不会误报“已保存”。
+- 在卡片库增加“申论复盘”同级页签，支持摘要列表、完整预览和返回原记录编辑；正文格式、标准答案、备注链接和批注均可回看。
+- 将 PDF 调整为 A4 横向双栏，保留标题、答题格、标准答案、备注、批注和可点击复盘链接，并同步更新申论中文使用文档、设计说明与实施计划。
+
+### Testing
+
+- TDD 红绿验证：先复现复制剪切缺失、打印内容缺失、批注越界、反向拖选、末尾及中间留白定位、保存竞态、草稿编号恢复、批注重定位、方向键/移动输入、箭头滚动刷新和卡片库链接等失败，再修复至通过。
+- `npm test -- --run tests/frontend/shenlun-editor.test.ts tests/frontend/shenlun-layout.test.ts tests/frontend/shenlun-draft-notes.test.ts tests/frontend/shenlun-styles.test.ts tests/frontend/shenlun-page.test.tsx tests/frontend/shenlun-review-library.test.tsx tests/frontend/shenlun-route.test.tsx tests/frontend/cards-page.test.tsx tests/frontend/app-shell.test.tsx tests/frontend/review-page.test.tsx tests/server/shenlun-reviews.test.ts tests/server/database.test.ts`：通过，12 个文件 255 项测试全部通过。
+- `npm test -- --run tests/server/card-folders.test.ts tests/server/backups.test.ts`：通过，2 个文件 68 项迁移与恢复测试全部通过。
+- `npm run typecheck`：通过；客户端和服务端 TypeScript 检查均无错误。
+- `npm run build`：通过；客户端和服务端构建成功，仅保留既有大包体积提示。
+- `npm test -- --run`：59 个文件中 58 个通过，811 项中 810 项通过；唯一失败为既有 `tests/frontend/liquid-glass-styles.test.ts` 图谱搜索浮层样式断言，与申论改动无关。
+- 浏览器与 PDF 验证：Chromium 实测新建保存跳转、卡片库预览、原记录编辑更新、1440px 与 390px 布局，控制台 0 错误；导出 PDF 为 1 页 A4 横向双栏，渲染图无覆盖，`pypdf` 检出 `/review#review-item-target` 可点击链接。
+- `git diff --check`：通过；仅输出工作树既有 LF/CRLF 提示。
+
+### Notes
+
+- `server/db/migrations/008_shenlun_reviews.sql`、`server/db/migrations.ts`：新增并注册申论复盘表结构迁移。
+- `server/shenlunReviews/`、`server/app.ts`、`server/index.ts`、`shared/contracts.ts`：实现申论复盘契约、仓储、服务、路由和应用挂载。
+- `src/shenlun/editor.ts`、`src/shenlun/layout.ts`、`src/shenlun/draft.ts`、`src/shenlun/notes.ts`：实现编辑历史、方格排版、草稿迁移、批注重定位和安全链接解析。
+- `src/pages/ShenlunPage.tsx`、`src/components/ShenlunGrid.tsx`、`src/components/ShenlunNotesRail.tsx`、`src/components/ShenlunConnectors.tsx`：实现类 Word 编辑、标准答案、备注批注和箭头交互。
+- `src/components/ShenlunReviewLibrary.tsx`、`src/pages/CardsPage.tsx`、`src/App.tsx`：接入申论复盘卡片库、预览和编辑路由。
+- `src/styles/shenlun.css`、`src/styles/shenlun-library.css`：实现 Apple 风格工作区、透明玻璃右栏、响应式布局和 A4 横向打印。
+- `tests/frontend/shenlun-*.test.ts*`、`tests/frontend/cards-page.test.tsx`、`tests/frontend/app-shell.test.tsx`、`tests/frontend/review-page.test.tsx`、`tests/server/shenlun-reviews.test.ts`、`tests/server/database.test.ts`、`tests/server/card-folders.test.ts`、`tests/server/backups.test.ts`：覆盖本轮功能及迁移回归。
+- `docs/申论答题纸.md`、`docs/superpowers/specs/2026-08-09-申论复盘与类Word编辑设计.md`、`docs/superpowers/plans/2026-08-09-申论复盘与类Word编辑实施计划.md`：记录使用方式、设计决策和施工步骤。
+- `progress.md`：追加本轮实现、验证与回滚说明。
+- 回滚点：设计基线提交为 `9a1e75b`。申论专属新增路径可按本节文件清单移除；`server/app.ts`、`server/index.ts`、`server/db/migrations.ts`、`shared/contracts.ts`、`src/App.tsx`、`src/pages/CardsPage.tsx` 等共享文件只反向应用申论相关导入、路由、挂载和页签代码块，禁止整体还原，以免覆盖工作树中的其他用户修改。
+
+## 2026-08-09 - Task: 修复申论正文输入及英数、空格排版
+
+### What was done
+
+- 修复隐藏输入代理持续清空组合文本的问题；中文输入法组合期间保留临时文本，结束时只提交一次，并在组合结果缺失时从输入框兜底读取，避免正文不落字或页面崩溃。
+- 组合期间拦截键盘字符，避免同一汉字被键盘事件与组合结束事件重复写入；移动端直接输入、粘贴和既有快捷键保持可用。
+- 将英文字母和数字的双字符格改为左右横排；普通空格占一格并计入字数与超限，Tab 生成的结构空位仍不计字数。
+- 同步更新申论使用文档中的输入法、英数排版和空格计数规则。
+
+### Testing
+
+- TDD 红灯：中文组合输入缺少结果时保持 0 字，组合期键盘事件会重复落字，普通空格保持 0 字，英数双字符样式未声明横排；修复后对应回归测试全部通过。
+- `npx vitest run tests/frontend/shenlun-page.test.tsx tests/frontend/shenlun-layout.test.ts tests/frontend/shenlun-grid-layout.test.tsx tests/frontend/shenlun-styles.test.ts`：通过，4 个文件 47 项测试全部通过。
+- `npm run typecheck`：通过，客户端与服务端 TypeScript 检查均无错误。
+- `npm run build`：通过，客户端与服务端构建成功；仅保留既有大包体积提示。
+- `npm test`：60 个文件中 59 个通过，815 项中 814 项通过；唯一失败为既有 `tests/frontend/liquid-glass-styles.test.ts` 图谱搜索浮层样式断言，与本轮申论改动无关。
+- 浏览器验证：Chromium 实测点击方格后输入 `申论A1 `，总字数为 5，中文仅落一次，`A1` 同格横排，空格独占一格，输入代理提交后清空；页面保持可见且控制台 0 错误、0 警告。截图保存于 `output/playwright/shenlun-input-fix-desktop.png`。
+- `git diff --check`：通过；仅输出工作树既有 LF/CRLF 提示。
+
+### Notes
+
+- `src/pages/ShenlunPage.tsx`：修复中文组合输入提交、重复输入保护和普通空格写入。
+- `src/shenlun/layout.ts`：保留普通空格为计数字符，同时继续忽略其他非正文空白。
+- `src/styles/shenlun.css`：将格内字符容器改为横向 Flex 排列。
+- `tests/frontend/shenlun-page.test.tsx`：新增中文输入法、重复提交和空格键回归测试。
+- `tests/frontend/shenlun-layout.test.ts`：新增普通空格计数、超限和结构空位区分测试。
+- `tests/frontend/shenlun-grid-layout.test.tsx`：新增英数双字符同格横排测试。
+- `docs/申论答题纸.md`：补充本轮输入与排版规则。
+- `progress.md`：追加本轮实现、验证和回滚说明。
+- 回滚点：本轮未单独提交；回滚时仅反向应用以上文件中“非受控组合输入代理、组合状态拦截、普通空格保留、`.shenlun-cell` 横向 Flex、三组新增测试及文档条目”的本节差异，不得整体还原这些仍包含其他申论功能的未跟踪文件。
+
+## 2026-08-09 - Task: 修复申论标点占格、末格输入与中文输入法拼音显示
+
+### What was done
+
+- 连续中文标点改为每两个共用一格；闭合标点落在行尾时与前一文字共格，并把第 25 格释放给后续正文。
+- 修复模板最后一格缺少末端光标的问题，最后一格可正常写入中文，继续输入会生成溢出格并保留超限提示。
+- 将原生输入法代理挂到页面根节点，消除玻璃主区域坐标系造成的 168px 偏移；聚焦前同步目标格坐标，拼音组合文本可见并随滚动、侧栏变化持续对齐。
+- 移除输入法代理的全局焦点外框，只保留当前方格光标提示，并同步更新申论使用文档。
+
+### Testing
+
+- TDD 红绿验证：先复现连续标点拆格、行尾标点挤占第 25 格、末格组合输入缺失、输入法代理不在页面根节点、聚焦时沿用旧坐标、焦点外框及滚动监听事件误传问题，再修复至通过。
+- `npx vitest run tests/frontend/shenlun-layout.test.ts tests/frontend/shenlun-editor.test.ts tests/frontend/shenlun-page.test.tsx tests/frontend/shenlun-styles.test.ts tests/frontend/shenlun-grid-layout.test.tsx`：通过，5 个文件 65 项测试全部通过。
+- `npm run typecheck`：通过，客户端与服务端 TypeScript 检查均无错误。
+- `npm run build`：通过，客户端与服务端构建成功；仅保留既有大包体积提示。
+- Chromium 实测：侧栏展开、折叠及页面滚动后，拼音输入代理与当前格横纵坐标误差均为 0px；`shen`、`lun` 组合文本可见，提交后正文得到“申论”且焦点保持。
+- Chromium 实测：`甲。”乙！？丙` 排为 `甲｜。”｜乙｜！？｜丙`；24 个“甲”后输入 `，乙` 时第 24 格为“甲，”、第 25 格为“乙”；第 200 格提交“末”后可在第 201 格继续写入“续”。
+
+### Notes
+
+- `src/shenlun/layout.ts`：实现连续标点配对占格及行尾闭合标点与前文共格。
+- `src/components/ShenlunGrid.tsx`：增加模板满格时的末端光标，并把点击目标格传给输入聚焦逻辑。
+- `src/pages/ShenlunPage.tsx`：将输入法代理 portal 到页面根节点，修正聚焦前定位和滚动、缩放同步。
+- `src/styles/shenlun.css`：显示组合输入文本、增加末格光标并清除代理输入框焦点外框。
+- `tests/frontend/shenlun-layout.test.ts`：新增连续标点和行尾闭合标点占格回归测试。
+- `tests/frontend/shenlun-editor.test.ts`：调整末格空位用例以覆盖分词换行形成的真实结构空位。
+- `tests/frontend/shenlun-page.test.tsx`：新增末格组合输入、页面根节点、聚焦前定位和滚动跟随测试。
+- `tests/frontend/shenlun-styles.test.ts`：新增可见组合输入、末格光标和焦点外框约束。
+- `docs/申论答题纸.md`：补充标点共格、行尾标点、末格输入和拼音显示规则。
+- `output/playwright/shenlun-ime-aligned.png`：保存输入法组合文本与当前格对齐的浏览器验证截图。
+- `progress.md`：追加本轮实现、验证与回滚说明。
+- 回滚点：本轮未单独提交；回滚时仅反向应用上述源码、测试、文档和本节日志的对应差异，并删除 `output/playwright/shenlun-ime-aligned.png`。这些申论文件仍包含其他未提交功能，禁止整体删除或还原。
+
+## 2026-08-09 - Task: 修复申论保存失败与卡片库无法恢复加载
+
+### What was done
+
+- 确认现有申论接口、数据库记录和正常 PUT 保存链路可用，将不可恢复场景定位为本地草稿持有失效复盘编号，以及卡片库首次请求失败后错误状态锁死。
+- 编辑旧记录遇到 404 时自动改为 POST 新建，并切换到新记录地址，避免用户反复保存失败。
+- 卡片库错误状态增加就地重新加载入口，请求恢复后直接显示申论复盘列表。
+
+### Testing
+
+- TDD 红灯：失效复盘编号保存后显示“保存失败”，卡片库失败页不存在重新加载按钮；修复后两项回归测试通过。
+- `npx vitest run tests/frontend/shenlun-page.test.tsx tests/frontend/shenlun-review-library.test.tsx tests/server/shenlun-reviews.test.ts`：通过，3 个文件 47 项测试全部通过。
+- 实际接口与浏览器验证：`GET /api/shenlun-reviews`、记录详情和 PUT 保存均返回 200；卡片库申论页签成功显示现有记录。
+
+### Notes
+
+- `src/pages/ShenlunPage.tsx`：为失效复盘编号增加 404 后自动新建与新地址切换。
+- `src/components/ShenlunReviewLibrary.tsx`：为列表加载失败增加可重复执行的重新加载状态。
+- `tests/frontend/shenlun-page.test.tsx`：新增旧记录不存在时恢复保存的回归测试。
+- `tests/frontend/shenlun-review-library.test.tsx`：新增失败后重新加载列表的回归测试。
+- `docs/申论答题纸.md`：补充失效记录保存和卡片库重新加载行为。
+- `progress.md`：追加本项实现、验证和回滚说明。
+- 回滚方式：仅反向应用本节所列文件中的 404 自动新建、列表重试、对应测试和文档日志差异；不得整体还原这些包含其他未提交申论功能的文件。
+
+## 2026-08-09 - Task: 修复申论页面放大后的完整展示
+
+### What was done
+
+- 将等效 200% 浏览器缩放范围纳入独立响应式规则，工具栏改为吸顶并保持模板按钮四列等宽。
+- 放大后答题纸使用限定高度的双向滚动视口，横向滚动条不再藏在整张长稿纸底部；右侧功能区按完整宽度下移。
+- 移除会破坏吸顶定位的页面根级裁切，页面保持无横向溢出，滚动只发生在答题纸内部。
+
+### Testing
+
+- TDD 红灯：760px 以下不存在缩放布局，新增页面根裁切后吸顶工具栏失效；修复后响应式约束通过。
+- `npx vitest run tests/frontend/shenlun-styles.test.ts`：通过，10 项样式测试全部通过。
+- Chromium 等效 200% 缩放验证：`720×450` 视口下文档 `scrollWidth` 等于 `clientWidth`，工具栏滚动后 `top` 为 0；答题纸水平和垂直滚动均可用，第 25 格可滚入可见区。
+
+### Notes
+
+- `src/styles/shenlun.css`：新增 760px 以下吸顶工具栏、四列模板切换、答题纸双向滚动和完整宽度右栏规则。
+- `tests/frontend/shenlun-styles.test.ts`：新增浏览器放大适配及吸顶滚动约束。
+- `docs/申论答题纸.md`：补充放大和窄屏下的操作行为。
+- `progress.md`：追加本项实现、验证和回滚说明。
+- 回滚方式：仅反向应用本节 760px 响应式媒体查询、对应样式测试、文档和日志差异，不触碰其他申论样式。
+
+## 2026-08-09 - Task: 增强申论文字颜色与连续装饰线
+
+### What was done
+
+- 在现有格式区间中增加红、蓝、绿三种可持久化文字颜色，并以“墨色”作为移除颜色的操作；折叠光标设置颜色后，后续输入会继承该颜色。
+- 将下划线和删除线改为贯穿字符容器的连续线段，英文和数字同格横排时仍保持左右衔接；加粗、颜色、下划线和删除线可以叠加使用。
+- 颜色格式沿用现有 `marks_json` 字段保存，本地草稿、服务端校验、卡片库预览和撤销重做均同步支持，不新增数据库字段或迁移。
+
+### Testing
+
+- TDD 红灯覆盖颜色区间覆盖与拆分、折叠光标继承、跨格选区、草稿读写、服务端保存、复盘预览和连续线样式；实现后 `npx vitest run tests/frontend/shenlun-editor.test.ts tests/frontend/shenlun-page.test.tsx tests/frontend/shenlun-styles.test.ts tests/frontend/shenlun-draft-notes.test.ts tests/frontend/shenlun-review-library.test.tsx tests/server/shenlun-reviews.test.ts` 通过，6 个文件 109 项测试全部通过。
+- `npm run typecheck`：通过，客户端与服务端 TypeScript 检查均无错误。
+- Chromium 实测：跨格全选后叠加红色、下划线和删除线，两个同格数字的横向装饰线宽度分别约为 14.12px 并连续衔接；保存状态显示“已保存”，PUT 接口返回 200。
+
+### Notes
+
+- `src/shenlun/editor.ts`、`src/shenlun/draft.ts`：增加颜色区间、待输入颜色、撤销重做与草稿校验。
+- `shared/contracts.ts`、`server/shenlunReviews/contracts.ts`、`server/shenlunReviews/routes.ts`：扩展格式契约和接口校验，继续复用原格式 JSON 字段。
+- `src/pages/ShenlunPage.tsx`、`src/components/ShenlunGrid.tsx`、`src/components/ShenlunReviewLibrary.tsx`：增加颜色工具、答题格颜色渲染和复盘预览。
+- `src/styles/shenlun.css`、`src/styles/shenlun-library.css`：增加颜色色板、文字颜色与连续下划线、删除线样式。
+- `tests/frontend/shenlun-editor.test.ts`、`tests/frontend/shenlun-page.test.tsx`、`tests/frontend/shenlun-styles.test.ts`、`tests/frontend/shenlun-draft-notes.test.ts`、`tests/frontend/shenlun-review-library.test.tsx`、`tests/server/shenlun-reviews.test.ts`：覆盖本任务格式链路。
+- `docs/申论答题纸.md`：补充颜色和连续装饰线使用说明。
+- `progress.md`：追加本项实现、验证和回滚说明。
+- 回滚方式：仅反向应用本节所列文件中的 `color` 格式区间、颜色工具、连续装饰线、对应测试和文档日志差异；不得整体还原这些包含其他未提交申论功能的文件。
+
+## 2026-08-09 - Task: 重设计申论右侧 Apple 玻璃功能区
+
+### What was done
+
+- 将右侧外层、标准答案、普通备注、批注列表和批注卡片改为不同透明度的中性玻璃，移除原有绿色与蓝色实体背景。
+- 统一各功能区 8px 曲线圆角、亮边、柔和内高光和分层阴影；文本框同步使用半透明白色材质，批注仅保留低饱和冷灰蓝边界用于识别。
+- 保留降低透明度和高对比度系统偏好的回退规则，不改变标准答案、备注链接、批注排序和独立滚动行为。
+
+### Testing
+
+- TDD 红灯确认右栏仍使用旧浅绿、浅蓝背景；实现后 `npx vitest run tests/frontend/shenlun-styles.test.ts tests/frontend/shenlun-page.test.tsx` 通过，2 个文件 35 项测试全部通过。
+- Chromium 桌面 `1440×1000` 与等效放大 `720×450` 视觉验证通过：右栏层次与圆角清晰，工具栏完整换行，答题纸可独立横向滚动，文档无横向溢出，控制台 0 错误。
+
+### Notes
+
+- `src/styles/shenlun.css`：重做右侧功能区五级玻璃透明度、圆角、边界、阴影和无障碍回退样式。
+- `tests/frontend/shenlun-styles.test.ts`：将旧颜色区分契约更新为中性分层玻璃和紧凑圆角契约。
+- `docs/申论答题纸.md`：更新备注与批注的玻璃材质说明。
+- `output/playwright/shenlun-word-glass-desktop.png`、`output/playwright/shenlun-word-glass-zoom.png`：保存桌面与放大视口验证截图。
+- `progress.md`：追加本项实现、验证和回滚说明。
+- 回滚方式：仅反向应用本节 `src/styles/shenlun.css` 中右栏玻璃材质、对应样式测试、文档、截图和日志差异，不触碰答题纸布局与文字格式功能。
+
+## 2026-08-09 - Task: 完成本轮申论修复最终回归
+
+### What was done
+
+- 对保存与卡片库、放大适配、文字颜色与连续装饰线、右侧玻璃功能区执行统一回归，确认四项需求在最新代码上共同成立。
+- 从真实卡片库进入“申论复盘”页签，加载刚保存的记录并打开预览，复核加粗、颜色、下划线和删除线的组合展示。
+
+### Testing
+
+- `npx vitest run tests/frontend/shenlun-layout.test.ts tests/frontend/shenlun-editor.test.ts tests/frontend/shenlun-grid-layout.test.tsx tests/frontend/shenlun-draft-notes.test.ts tests/frontend/shenlun-styles.test.ts tests/frontend/shenlun-page.test.tsx tests/frontend/shenlun-review-library.test.tsx tests/frontend/shenlun-route.test.tsx tests/frontend/cards-page.test.tsx tests/frontend/app-shell.test.tsx tests/frontend/review-page.test.tsx tests/server/shenlun-reviews.test.ts tests/server/database.test.ts`：通过，13 个文件 272 项测试全部通过。
+- `npm run typecheck`：通过；`npm run build`：通过，客户端与服务端构建成功，仅保留既有大包体积提示。
+- Chromium 真实流程：PUT 保存返回 200，卡片库申论复盘列表与预览正常，组合格式预览计算颜色为 `rgb(180, 35, 24)`，桌面和等效放大页面控制台均为 0 错误。
+
+### Notes
+
+- `progress.md`：追加本轮最终回归证据与回滚说明。
+- 回滚方式：删除本节最终回归日志即可；功能回滚点分别见前述四个任务记录，禁止整体还原包含其他用户改动的未提交文件。
+
+## 2026-08-09 - Task: 修复申论正文行尾多余空列
+
+### What was done
+
+- 将正文默认排版改为逐格连续填满每行 25 格，取消中文分词在行尾预留整词空位的默认行为。
+- 保留显式中文分词选项，并继续执行连续标点共格、闭合标点不落行首等现有申论标点规则。
+
+### Testing
+
+- `npx vitest run tests/frontend/shenlun-layout.test.ts -t "默认逐格排满行尾"`：修复前按预期失败，首行仅占 23 格，稳定复现多余空列。
+- `npx vitest run tests/frontend/shenlun-layout.test.ts tests/frontend/shenlun-editor.test.ts`：通过，2 个文件 35 项测试全部通过。
+
+### Notes
+
+- `src/shenlun/layout.ts`：将中文分词换行改为仅显式启用。
+- `tests/frontend/shenlun-layout.test.ts`：新增默认填满行尾回归测试，并保留显式分词覆盖。
+- `tests/frontend/shenlun-editor.test.ts`：更新已失效的分词留空编辑场景，验证正文末尾连续输入。
+- `docs/申论答题纸.md`：说明正文默认填满 25 格且继续保留标点规则。
+- `progress.md`：追加本项实现、验证和回滚说明。
+- 回滚方式：反向应用本节四个实现、测试与文档文件的对应差异，并删除本节日志；不要回退这些文件中的其他用户改动。
+
+## 2026-08-09 - Task: 修复申论编辑区重复光标
+
+### What was done
+
+- 正文中的光标不再同时触发正文末尾空白格光标，只有光标确实位于全文末尾时才显示末尾光标。
+- 隐藏输入法承载层的原生光标，仅保留方格编辑光标；中文输入法组合文本仍在当前方格附近显示。
+
+### Testing
+
+- `npx vitest run tests/frontend/shenlun-grid-layout.test.tsx tests/frontend/shenlun-styles.test.ts`：修复前按预期失败，稳定复现方格索引 0 与正文末尾索引 2 同时显示光标，并检出输入层仍绘制原生光标。
+- `npx vitest run tests/frontend/shenlun-grid-layout.test.tsx tests/frontend/shenlun-styles.test.ts tests/frontend/shenlun-page.test.tsx`：通过，3 个文件 38 项测试全部通过。
+
+### Notes
+
+- `src/components/ShenlunGrid.tsx`：用正文长度约束末尾光标，只允许一个方格命中光标状态。
+- `src/pages/ShenlunPage.tsx`：向方格组件传入当前正文长度。
+- `src/styles/shenlun.css`：隐藏输入代理的原生光标。
+- `tests/frontend/shenlun-grid-layout.test.tsx`：新增正文中与正文末尾单光标回归测试。
+- `tests/frontend/shenlun-styles.test.ts`：新增输入代理透明光标样式契约。
+- `docs/申论答题纸.md`：补充单光标与中文输入法显示说明。
+- `progress.md`：追加本项实现、验证和回滚说明。
+- 回滚方式：反向应用本节六个实现、测试与文档文件的对应差异，并删除本节日志；不要回退这些文件中的其他用户改动。
+
+## 2026-08-09 - Task: 补充本轮最终回归记录顺序
+
+### What was done
+
+- 说明上方“完成本轮行尾、光标与批注修复回归”记录因机械插入位置早于批注任务记录；实际执行顺序为先完成批注修复，再执行该最终回归，验证结论不受影响。
+
+### Testing
+
+- 本项仅补充日志顺序说明，未改动运行时代码；最终验证证据仍以上方 74 项申论测试、类型检查、生产构建和 Chromium 真实流程为准。
+
+### Notes
+
+- `progress.md`：在末尾追加实际执行顺序说明，不改写既有历史记录。
+- 回滚方式：删除本节顺序说明即可，不影响任何功能和验证结果。
+
+## 2026-08-09 - Task: 完成本轮行尾、光标与批注修复回归
+
+### What was done
+
+- 在真实 Chromium 桌面视口复现输入、选区、创建批注完整流程，确认行尾填满、单光标、就近批注入口和连接箭头共同生效。
+- 对本轮受影响模块执行最终测试、类型检查与客户端、服务端生产构建。
+
+### Testing
+
+- `npx vitest run tests/frontend/shenlun-layout.test.ts tests/frontend/shenlun-editor.test.ts tests/frontend/shenlun-grid-layout.test.tsx tests/frontend/shenlun-page.test.tsx tests/frontend/shenlun-styles.test.ts`：通过，5 个文件 74 项测试全部通过。
+- `npm run typecheck`：通过；`npm run build`：通过，客户端与服务端构建成功，仅保留既有大包体积提示。
+- Chromium `1440×1000` 真实流程：首行占满 25 格，方格光标数量为 1，输入代理光标透明；批注入口位于选区右侧 8px 且挂载于页面浮层，连接线箭身与箭头均使用可见浅灰蓝色，控制台 0 错误。
+- 扩展执行 13 个相关页面和服务端测试文件时，275 项中 274 项通过；既有 `tests/frontend/review-page.test.tsx` 的“地址锚点会展开板块并定位非默认小板块中的图片”用例失败，单独重跑仍失败。该用例属于复盘图片锚点模块，不在本轮申论修复范围，本轮未改动其实现。
+
+### Notes
+
+- `output/playwright/shenlun-annotation-caret-fix.png`：保存行尾填满、就近批注入口和完整连接箭头的真实浏览器截图。
+- `progress.md`：追加本轮最终回归证据、既有测试缺口和回滚说明。
+- 回滚方式：删除本节截图与本节日志即可；三项功能回滚点分别见前述对应任务记录，不要整体还原包含其他用户改动的文件。
+
+## 2026-08-09 - Task: 修复申论批注入口位置与连接箭头
+
+### What was done
+
+- 选中文字后，将“添加批注”入口从整张答题纸末尾移到选区末格旁边，并在页面滚动、答题纸滚动或缩放时重新定位。
+- 恢复原文与右侧批注卡片之间的浅色连接箭头，箭身和箭头统一使用组件自身颜色，不再依赖已失效的主题变量。
+
+### Testing
+
+- `npx vitest run tests/frontend/shenlun-page.test.tsx tests/frontend/shenlun-styles.test.ts -t "批注|箭头|ribbon"`：修复前按预期失败，稳定检出批注入口仍位于答题纸内部且没有就近坐标、连接线仍引用失效颜色变量。
+- 同一命令修复后通过，5 项目标测试通过；随后执行 `npx vitest run tests/frontend/shenlun-page.test.tsx tests/frontend/shenlun-styles.test.ts`，2 个文件 37 项测试全部通过。
+
+### Notes
+
+- `src/pages/ShenlunPage.tsx`：计算选区末格的视口坐标，以页面浮层呈现并持续同步批注入口。
+- `src/components/ShenlunConnectors.tsx`：箭身与箭头改用统一的当前颜色。
+- `src/styles/shenlun.css`：补充批注浮层定位与玻璃样式，并为连接线设置可见层级和浅色。
+- `tests/frontend/shenlun-page.test.tsx`：新增批注入口就近定位与连接箭头颜色回归测试。
+- `tests/frontend/shenlun-styles.test.ts`：新增批注浮层和连接线可见性样式契约。
+- `docs/申论答题纸.md`：更新就近批注入口及箭头行为说明。
+- `progress.md`：追加本项实现、验证和回滚说明。
+- 回滚方式：反向应用本节六个实现、测试与文档文件的对应差异，并删除本节日志；不要回退这些文件中的其他用户改动。
+
+## 2026-08-09 - Task: 确认本轮任务实际执行顺序
+
+### What was done
+
+- 确认本轮实际执行顺序为行尾空列、重复光标、批注入口与箭头、最终统一回归；上方最终回归记录的显示位置早于批注任务记录，是日志补丁命中同名回滚行所致，不代表实际施工顺序。
+
+### Testing
+
+- 本项仅追加记录顺序说明，未改动运行时代码；功能验证仍以 74 项申论测试、类型检查、生产构建和 Chromium 真实流程结果为准。
+
+### Notes
+
+- `progress.md`：在文件末尾追加实际执行顺序说明，保留此前全部历史记录。
+- 回滚方式：删除本节顺序说明即可，不影响功能与验证结果。
+
+## 2026-08-09 - Task: 修复申论失联批注导致保存失败
+
+### What was done
+
+- 定位并修复失联批注的保存边界：批注对应原文被删除或改写后，允许保留历史起止位置和批注内容，不再因为历史区间超出当前正文而拒绝整篇申论稿。
+- 继续严格校验仍与当前正文关联的有效批注，越界或原文不一致的有效批注仍会被拒绝。
+
+### Testing
+
+- TDD 红灯：提交正文为空、批注 `detached: true` 且历史区间为 `0..4` 的请求，修复前服务端稳定返回 `400`。
+- `npx vitest run tests/server/shenlun-reviews.test.ts`：通过，20 项测试全部通过；有效批注越界拒绝用例仍通过。
+- `npx vitest run tests/server/shenlun-reviews.test.ts tests/frontend/shenlun-page.test.tsx tests/frontend/shenlun-draft-notes.test.ts tests/frontend/shenlun-review-library.test.tsx tests/server/database.test.ts`：通过，5 个文件 102 项测试全部通过。
+- `npm run typecheck`：通过；`npm run build`：通过，客户端与服务端构建成功，仅保留既有大包体积提示。
+- Chromium 真实流程：添加批注后删除原文，批注变为失联状态；点击“保存回顾”显示“已保存”，POST 返回 `201`，卡片库列表返回 `200` 并包含该记录。
+
+### Notes
+
+- `server/shenlunReviews/routes.ts`：只对非失联批注执行当前正文区间上限校验。
+- `tests/server/shenlun-reviews.test.ts`：新增失联批注可保存回归测试，并保留有效批注越界拒绝测试。
+- `docs/申论答题纸.md`：补充失联批注不阻止保存的行为说明。
+- `progress.md`：追加本项实现、验证和回滚说明。
+- 回滚方式：反向应用本节服务端、测试与文档差异并删除本节日志；不要整体还原包含其他用户改动的文件。
+
+## 2026-08-09 - Task: 重启过期生产服务恢复申论保存与卡片库
+
+### What was done
+
+- 根据用户截图确认申论保存和卡片库列表同时失败，定位为 `8787` 旧生产进程未加载最新申论路由：旧实例对 `/api/shenlun-reviews` 返回 `404`，而最新开发实例返回 `200`。
+- 停止旧生产进程，使用最新 `dist-server` 在项目目录重新启动 `8787` 服务；生产端申论新建、详情、列表和卡片库预览均恢复。
+- 补充生产服务更新说明，明确服务端源码或构建产物更新后必须重启进程，避免页面与 API 版本错配。
+
+### Testing
+
+- 重启前：`GET http://127.0.0.1:8787/api/shenlun-reviews` 返回 `404`；同一接口在最新开发服务 `8791` 返回 `200`。
+- 重启后：`GET /api/health`、`GET /api/shenlun-reviews` 均返回 `200`，申论新建返回 `201`、详情返回 `200`。
+- Chromium 生产端真实流程：在 `8787` 页面写入正文并保存，页面显示“已保存”；进入卡片库申论页签后错误提示数量为 0，复盘卡片与预览详情正常显示，控制台 0 错误。
+- `npx vitest run tests/server/shenlun-reviews.test.ts tests/frontend/shenlun-page.test.tsx tests/frontend/shenlun-review-library.test.tsx`：通过，3 个文件 51 项测试全部通过。
+- `npm run typecheck`：通过。
+- 生产端浏览器与接口验证生成的两条临时申论记录均按精确编号删除，只删除本轮测试数据，未触碰用户记录。
+
+### Notes
+
+- `docs/本地运行与数据管理.md`：补充生产构建更新后必须停止旧服务并重新启动的说明。
+- `output/playwright/shenlun-production-save-recovered.png`：保存生产端保存、卡片库和预览恢复后的浏览器截图。
+- `progress.md`：追加故障根因、服务重启、验证和回滚说明。
+- 回滚方式：文档与截图可反向应用本节差异并删除本节日志；服务重启不产生源码回滚点，如需恢复旧运行态需停止当前 `npm start` 并显式启动目标旧构建，但会重新引入申论接口 `404`。
+
+## 2026-08-09 - Task: 为申论卡片库增加模糊搜索并降低卡片透明度
+
+### What was done
+
+- 在卡片库“申论复盘”页签增加本地即时搜索，支持按标题、正文摘要和字数模板匹配，多个关键词可用空格组合。
+- 搜索无结果时保留搜索框并显示明确状态，输入框内的清空按钮可恢复全部申论卡片，不新增服务端请求。
+- 将申论卡片白色玻璃底的不透明度从 `0.58` 提高到 `0.78`，并提升选择器优先级，避免被通用嵌套玻璃规则覆盖。
+
+### Testing
+
+- TDD 红灯：新增测试后，现有页面因缺少“搜索申论复盘”输入框而失败，样式测试因卡片仍为 `0.58` 且缺少抗覆盖选择器而失败。
+- `npx vitest run tests/frontend/shenlun-styles.test.ts tests/frontend/shenlun-review-library.test.tsx tests/frontend/cards-page.test.tsx`：通过，3 个文件 91 项测试全部通过。
+- `npm run typecheck`：通过；`npm run build`：通过，客户端与服务端构建成功，仅保留既有大包体积提示。
+- Chromium 生产端 `1440×1000`：验证 `400字` 模板搜索、无结果状态与清空恢复；卡片最终计算背景为 `rgba(255, 255, 255, 0.78)`，控制台 0 错误。
+
+### Notes
+
+- `src/components/ShenlunReviewLibrary.tsx`：增加搜索状态、组合关键词匹配、搜索框、清空按钮与无结果状态。
+- `src/styles/shenlun-library.css`：增加搜索控件样式并提高申论卡片玻璃底实度与选择器优先级。
+- `tests/frontend/shenlun-review-library.test.tsx`、`tests/frontend/shenlun-styles.test.ts`：增加搜索行为、清空恢复和最终透明度回归测试。
+- `docs/申论答题纸.md`：补充申论复盘搜索范围、组合方式和卡片材质说明。
+- `output/playwright/shenlun-library-search-glass.png`：保存生产端搜索框与低透明度申论卡片验收截图。
+- `progress.md`：追加本项实现、验证和回滚说明。
+- 回滚方式：反向应用本节组件、样式、测试与文档差异，删除本节截图和日志；不要整体还原包含其他用户改动的文件。
+
+## 2026-08-09 - Task: 新建独立空白申论纸且不覆盖旧稿
+
+### What was done
+
+- 在申论工具栏增加“新建申论”命令，可从本地草稿或已保存复盘直接切换到全新的 400 字空白答题纸。
+- 新建时同步解除旧复盘编号，重置标题、正文、格式、标准答案、备注、批注和编辑状态；旧服务端记录不删除、不更新。
+- 新稿第一次保存固定使用创建请求，保存后才绑定新的复盘编号，后续编辑仍更新新记录。
+
+### Testing
+
+- TDD 红灯：从已保存稿进入页面后找不到“新建申论”按钮，稳定复现只能继续覆盖旧记录的操作缺口。
+- `npx vitest run tests/frontend/shenlun-page.test.tsx tests/frontend/shenlun-draft-notes.test.ts tests/frontend/shenlun-route.test.tsx`：通过，3 个文件 63 项测试全部通过。
+- 回归用例确认新稿首次保存请求为 `POST /api/shenlun-reviews`，且没有向旧编号发送 `PUT`。
+- `npm run typecheck`：通过。
+
+### Notes
+
+- `src/pages/ShenlunPage.tsx`：增加新建命令与完整工作台状态重置逻辑。
+- `tests/frontend/shenlun-page.test.tsx`：增加从已保存稿新建并另存为新记录的回归测试。
+- `docs/申论答题纸.md`：补充新建空白答题纸与旧稿保护行为说明。
+- `progress.md`：追加本项实现、验证和回滚说明。
+- 回滚方式：反向应用本节页面、测试与文档差异并删除本节日志；不要删除或修改数据库中已经保存的申论记录。
+## 2026-08-09 - Task: 补齐申论卡片置顶与归档管理
+
+### What was done
+
+- 申论卡片库新增“当前/已归档”视图，并补齐置顶、取消置顶、归档和恢复操作；预览继续可用，当前稿可进入编辑，归档稿只提供预览与恢复，避免误改历史内容。
+- 当前列表按“已置顶优先、最近更新优先”排序；置顶或归档操作完成后就地刷新列表，失败时保留当前内容并显示操作错误。
+- 服务端和数据库增加申论复盘的置顶、归档状态，列表接口支持归档筛选，状态更新接口仅接受布尔值且拒绝空更新。
+- 延续申论卡片库的玻璃材质，增加紧凑分段视图、固定尺寸图标按钮和置顶卡片提示，同时保留本轮已完成的模糊搜索。
+
+### Testing
+
+- TDD 红灯：数据库迁移版本、状态字段与索引缺失，状态更新接口返回 `404`，前端缺少置顶按钮和归档视图，样式契约缺失；实现后上述用例全部转绿。
+- `npx vitest run tests/frontend/shenlun-layout.test.ts tests/frontend/shenlun-editor.test.ts tests/frontend/shenlun-grid-layout.test.tsx tests/frontend/shenlun-draft-notes.test.ts tests/frontend/shenlun-styles.test.ts tests/frontend/shenlun-page.test.tsx tests/frontend/shenlun-review-library.test.tsx tests/frontend/shenlun-route.test.tsx tests/frontend/cards-page.test.tsx tests/server/shenlun-reviews.test.ts tests/server/database.test.ts`：通过，11 个文件 231 项测试全部通过。
+- `npm run typecheck`：通过；`npm run build`：通过，客户端与服务端生产构建成功，仅保留既有大包体积提示。
+- 生产数据库已增量迁移到版本 `9`，确认 `pinned`、`archived` 字段和归档排序索引存在；现有 1 条用户申论记录保持未置顶、未归档，归档区为空。
+- Chromium 生产端验证：当前/已归档切换、搜索、预览、置顶和归档入口正常显示；从旧稿点击“新建申论”后进入 0/400 空白稿，网络中没有覆盖旧稿的写请求，控制台 0 错误。
+
+### Notes
+
+- `server/db/migrations/009_shenlun_review_library_state.sql`：为申论复盘增量增加置顶、归档字段及列表索引。
+- `server/db/migrations.ts`：注册第 9 版申论卡片管理迁移。
+- `server/shenlunReviews/contracts.ts`、`server/shenlunReviews/repository.ts`、`server/shenlunReviews/service.ts`、`server/shenlunReviews/routes.ts`：增加状态契约、归档筛选排序、状态更新和接口校验。
+- `shared/contracts.ts`：向前后端共享的申论摘要与详情补充置顶、归档状态。
+- `src/components/ShenlunReviewLibrary.tsx`：增加当前/归档视图、置顶、归档、恢复及列表就地更新。
+- `src/styles/shenlun-library.css`：增加分段视图、操作按钮和置顶卡片的 Apple 风格玻璃样式。
+- `tests/server/shenlun-reviews.test.ts`、`tests/server/database.test.ts`：覆盖状态接口、筛选排序、迁移字段和索引。
+- `tests/frontend/shenlun-review-library.test.tsx`、`tests/frontend/shenlun-styles.test.ts`：覆盖卡片管理交互与样式契约。
+- `docs/申论答题纸.md`：补充申论卡片库状态管理和数据库版本说明。
+- `output/playwright/shenlun-library-management.png`、`output/playwright/shenlun-new-blank.png`：保存卡片管理与独立新建空白稿的真实浏览器验收截图。
+- `progress.md`：追加本项实现、验证和回滚说明。
+- 回滚方式：反向应用本节应用代码、测试与文档差异并删除本节截图和日志；数据库迁移为增量字段，回滚应用时可保留字段，若确需移除必须先备份并重建表，禁止直接破坏现有申论记录。
+## 2026-08-10 - Task: 修复卡片库发送 Anki 后无可见反馈
+
+### What was done
+
+- 复现并定位“点击发送后没反应”：请求实际发出且返回失败，但原提示位于卡片列表上方，滚动到卡片按钮后提示落在视口外；同时服务端丢弃了 cc-connect 的真实失败原因。
+- 将卡片发送的处理中、成功和失败状态改为挂载到页面根节点的固定玻璃提示，始终出现在当前视口右下角，并提供关闭按钮。
+- 前端直接展示服务端返回的安全错误消息；服务端识别本次实际出现的微信 `expired context_token`，提示先给 cc-connect 机器人发送一条消息刷新会话后重试。
+- 保持 Anki 生成、发送命令、卡片内容和每日自动发送计时逻辑不变。
+
+### Testing
+
+- 根因证据：修复前真实浏览器 POST 返回 `502`，失败提示顶部坐标为 `-8.7px`，位于当前视口外；手工执行同一 cc-connect 命令返回微信 `expired context_token` 与“user must send a new message”。
+- TDD 红灯：新增测试后，前端找不到处理中状态和固定反馈样式，服务端仍返回笼统连接错误，共 3 项按预期失败。
+- `npx vitest run tests/frontend/cards-page.test.tsx tests/server/anki-routes.test.ts -t "Anki|微信会话"`：通过，15 项相关测试全部通过。
+- `npx vitest run tests/frontend/cards-page.test.tsx tests/frontend/settings-page.test.tsx tests/server/anki-apkg.test.ts tests/server/anki-auto-send.test.ts tests/server/anki-daily.test.ts tests/server/anki-library-exports.test.ts tests/server/anki-routes.test.ts tests/server/anki-sender.test.ts tests/server/anki-source.test.ts`：通过，9 个文件 132 项测试全部通过。
+- `npm run typecheck`：通过；`npm run build`：通过，客户端与服务端生产构建成功，仅保留既有大包体积提示。
+- Chromium 生产端验证：失败提示计算样式为 `position: fixed`，在 `1036×905` 视口中位于 `x=570.7..1000.7`、`y=826..885.3`，完整可见；关闭后页面中相关提示元素为 0。控制台仅记录预期的接口 `502`，没有前端运行时异常。
+- 诊断生成的 6 组 `.apkg`/Markdown 临时文件已按精确路径删除，未修改数据库、卡片内容或既有导出记录。
+
+### Notes
+
+- `server/anki/daily.ts`：允许发送结果携带安全错误诊断字段。
+- `server/anki/routes.ts`：将微信会话令牌过期映射为可执行的中文恢复提示。
+- `src/pages/CardsPage.tsx`：增加固定视口的发送进度、成功、失败反馈，并显示接口具体消息和关闭入口。
+- `src/styles/cards-glass.css`：增加 Anki 发送提示的固定玻璃样式、稳定尺寸与移动端适配。
+- `tests/server/anki-routes.test.ts`：覆盖微信会话令牌过期的接口消息。
+- `tests/frontend/cards-page.test.tsx`：覆盖处理中状态、具体失败原因、关闭操作与固定视口样式。
+- `docs/anki-cc-connect.md`：补充卡片库发送反馈和微信会话恢复说明。
+- `output/playwright/anki-send-feedback.png`：保存真实浏览器中固定失败提示的验收截图。
+- `progress.md`：追加本项根因、实现、验证和回滚说明。
+- 回滚方式：反向应用本节代码、测试与文档差异，并删除本节截图和日志；本轮没有数据库结构或卡片数据变更，不需要数据回滚。
+
+## 2026-08-12 - Task: 背诵按不会、熟练与上次抽取时间加权
+
+### What was done
+
+- 将背诵随机抽取改为无放回加权抽取：不会次数提高权重，熟练次数降低权重，距上次抽取越久逐步恢复权重；新卡权重为 `2.0`，卡片总权重下限锁定为 `0.25`。
+- 同一卡片的多个题面均分卡片总权重，避免题面数量放大整张卡片的抽取概率；固定顺序、到期优先和现有筛选行为保持不变。
+- 数据库第 10 版为卡片增加可空的上次抽取时间与索引；会话题面成功组装后仅更新实际抽中卡片，同一张卡片一轮只写回一次。
+- 已在线备份并将生产数据库增量升级到第 10 版，现有 494 张卡片数量不变；生产服务已使用最终构建重新启动。
+
+### Testing
+
+- `npx vitest run tests/server/database.test.ts tests/server/study-session.test.ts tests/server/card-folders.test.ts tests/server/backups.test.ts tests/frontend/study-joystick.test.tsx tests/frontend/study-known-flow.test.tsx tests/frontend/study-page.test.tsx tests/frontend/study-random-original.test.tsx tests/frontend/study-range-preview.test.tsx tests/frontend/study-range.test.tsx tests/frontend/study-shortcuts.test.tsx`：通过，11 个测试文件共 150 项测试全部通过。
+- `npm run typecheck`：通过。
+- `npm run build`：通过，客户端与服务端构建成功；仅保留既有的大包体积提示。
+- `npm test`：本次迁移造成的备份恢复与文件夹迁移旧版本断言已修正；全量 848 项中 847 项通过，剩余 1 项为既有知识图谱 CSS 浮层规则测试，与本次背诵及数据库改动无关。
+- 生产核验：`/api/health` 返回 `ok`；数据库版本为 `10`，`last_drawn_at` 为可空 `TEXT` 且索引列正确，`PRAGMA integrity_check` 为 `ok`，卡片数量为 494。
+- 上线前 SQLite 在线备份完整性为 `ok`，备份文件为 `data/backups/gongkao-pre-study-weight-20260812-221000.db`，备份卡片数量同为 494。
+
+### Notes
+
+- `server/db/migrations/010_card_last_drawn_at.sql`：新增卡片上次抽取时间与索引。
+- `server/db/migrations.ts`：注册第 10 版迁移，并沿用当前未提交迁移链。
+- `server/study/service.ts`：汇总熟练记录、计算卡片与题面权重、执行无放回加权抽取并写回抽取时间。
+- `tests/server/database.test.ts`：验证迁移版本、字段可空性和目标索引列。
+- `tests/server/study-session.test.ts`：验证新卡、不熟练、熟练、时间恢复、权重下限、题面均分、写回去重和失败不写回。
+- `tests/server/card-folders.test.ts`、`tests/server/backups.test.ts`：将迁移链预期同步到第 10 版。
+- `docs/背诵加权抽取.md`：记录正式权重规则、数据来源和迁移行为。
+- `docs/superpowers/specs/2026-08-12-背诵加权抽取设计.md`、`docs/superpowers/plans/2026-08-12-背诵加权抽取实施计划.md`：记录本轮中文设计与实施计划。
+- `progress.md`：追加本轮实现、验证、上线与回滚说明。
+- 回滚方式：先停止 `8787` 的当前 `node dist-server/index.js` 服务，使用 `data/backups/gongkao-pre-study-weight-20260812-221000.db` 恢复升级前数据库，再反向应用本节代码、测试与文档差异并重新构建启动；不要直接删除生产数据库字段或覆盖其他未提交改动。
+- `data/backups/gongkao-pre-study-weight-20260812-221000.db`：保存第 10 版迁移前的完整 SQLite 在线备份，供精确数据回滚使用。
+
+## 2026-08-15 - Task: 开启同一局域网的手机访问
+
+### What was done
+
+- 新增可配置的服务监听地址，仓库默认继续使用 `127.0.0.1`，本机 `.env` 设为 `0.0.0.0` 以接收同一局域网的访问。
+- 重新构建并启动生产服务，当前进程监听 `0.0.0.0:8787`，手机可使用电脑 Wi-Fi IPv4 和端口 `8787` 访问。
+- 检查 Windows 防火墙：当前公用网络配置下已有针对 `D:\node\node.exe` 的入站允许规则，因此没有新增或扩大系统防火墙规则。
+
+### Testing
+
+- TDD 红灯：新增 `HOST` 默认值和 `0.0.0.0` 配置测试后，原实现因没有返回 `host` 产生 2 项预期失败。
+- `npm test -- --run tests/server/health.test.ts`：通过，13 项测试全部通过。
+- `npx tsc -p tsconfig.server.json --noEmit`：通过。
+- `npm run build:server`：通过，生产服务端构建成功。
+- 运行验证：新进程监听 `0.0.0.0:8787`；`http://127.0.0.1:8787/api/health` 与 `http://192.168.5.35:8787/api/health` 均返回 `200` 和 `{"status":"ok"}`，`http://192.168.5.35:8787/cards` 返回 `200` 及 HTML。
+- 防火墙验证：确认当前 WLAN 为 Public，系统已启用两条 `Node.js JavaScript Runtime` 的 Public 入站 Allow 规则，程序路径为 `D:\node\node.exe`。
+
+### Notes
+
+- `server/config.ts`：增加 `HOST` 读取及默认本机监听地址。
+- `server/index.ts`：使用配置的主机地址启动 HTTP 服务。
+- `tests/server/health.test.ts`：覆盖默认主机和局域网监听配置。
+- `.env.example`：记录安全的默认 `HOST` 和局域网配置含义。
+- `.env`：本机私有配置启用 `HOST=0.0.0.0`，未读取、修改或记录其他敏感值。
+- `docs/本地运行与数据管理.md`：补充监听参数、手机访问地址、防火墙边界和浏览器本地数据差异。
+- `progress.md`：追加本轮实现、验证与回滚说明。
+- 回滚方式：把本机 `.env` 的 `HOST` 改回 `127.0.0.1`，反向应用本节服务、测试和文档差异，执行 `npm run build:server` 后停止当前 `8787` 进程并重新运行 `node dist-server/index.js`。本轮未创建防火墙规则，无需回滚系统规则。
+
+## 2026-08-15 - Task: 卡片库支持输入页码跳转
+
+### What was done
+
+- 将卡片库分页栏的当前页改为可编辑页码，支持按 `Enter` 或失焦跳转，并继续通过现有 URL `page` 参数加载目标页。
+- 支持 `Escape` 取消、空值和非法值恢复当前页、`0` 与超出总页数的输入自动收敛到有效范围；输入当前页不会重复请求，加载期间输入框暂时禁用。
+- 为页码输入补充与现有卡片库一致的浅色玻璃、44 像素操作高度、红色聚焦环和稳定宽度，并保留上一页、下一页按钮。
+
+### Testing
+
+- TDD 红灯：新增 5 项页码交互用例后，原页面因不存在页码输入框产生预期失败。
+- `npx vitest run tests/frontend/cards-page.test.tsx`：通过，83 项测试全部通过，覆盖 Enter、失焦、上下界、非数字拦截、空值、Escape、当前页不重复请求、四位页码宽度和加载禁用。
+- `npm run typecheck`：通过。
+- `npm run build`：通过，客户端与服务端生产构建成功；仅保留既有的大包体积提示。
+- Chromium 真实流程：在 `http://127.0.0.1:8787/cards?page=1&pageSize=20` 输入页码 `3` 并按 Enter，地址更新为 `page=3`，卡片列表同步换页，分页栏显示“第 3 / 21 页”。
+- `git diff --check -- src/pages/CardsPage.tsx tests/frontend/cards-page.test.tsx src/styles/cards-glass.css`：通过，无空白错误。
+
+### Notes
+
+- `src/pages/CardsPage.tsx`：增加页码草稿、提交和取消逻辑，并将分页状态改为可输入控件。
+- `src/styles/cards-glass.css`：增加页码输入的玻璃材质、焦点、禁用和尺寸样式。
+- `tests/frontend/cards-page.test.tsx`：增加页码交互与样式回归测试。
+- `docs/卡片库分页.md`：记录页码输入、快捷操作、边界和加载行为。
+- `docs/superpowers/specs/2026-08-15-卡片库页码跳转设计.md`、`docs/superpowers/plans/2026-08-15-卡片库页码跳转实施计划.md`：记录确认后的设计与实施计划。
+- `output/playwright/cards-page-number-jump.png`：保存真实浏览器分页控件验收截图。
+- `progress.md`：追加本轮实现、验证与回滚说明。
+- 回滚方式：仅反向应用本节 `CardsPage`、分页样式、测试和文档差异，并删除本节截图与日志；本轮未修改接口、数据库或卡片数据，无需数据回滚。
+
+## 2026-08-15 - Task: 修复横向图谱卡片搜索区域视口限高
+
+### What was done
+
+- 将横向图谱子节点弹窗中的卡片搜索区接入既有搜索浮层样式，并按浏览器视口限制最大高度。
+- 搜索结果继续在区域内部滚动，避免顶部表单占用空间时搜索内容被弹窗裁切。
+
+### Testing
+
+- 全量测试首次运行稳定复现 1 项失败：搜索区域缺少 `.graphs-horizontal-card-search` 样式规则，CSS 契约匹配结果为空。
+- `npx vitest run tests/frontend/liquid-glass-styles.test.ts tests/frontend/graphs-page.test.tsx`：通过，2 个文件共 47 项测试全部通过。
+
+### Notes
+
+- `src/pages/GraphsPage.tsx`：为实际横向卡片搜索区域增加浮层类名。
+- `src/styles/graphs.css`：增加基于 `100dvh` 的最大高度与溢出约束。
+- `docs/知识图谱.md`：补充搜索区域视口限高行为。
+- `progress.md`：追加本轮根因、实现、验证和回滚说明。
+- 回滚方式：反向应用本节组件、图谱样式与文档差异并删除本节日志；本轮不涉及接口、数据库或图谱数据变更。
+
+## 2026-08-15 - Task: GitHub 同步前全量验证
+
+### What was done
+
+- 对当前功能分支累计完成的申论、卡片库、Anki、知识图谱、背诵加权和运行配置改动执行统一发布前验证。
+- 保持 Git 忽略边界，`.env`、数据库、备份、构建产物、浏览器输出和运行日志不进入版本库。
+
+### Testing
+
+- `npm test -- --run`：通过，60 个测试文件共 858 项测试全部通过。
+- `npm run typecheck`：通过。
+- `npm run build`：通过，客户端与服务端生产构建成功；仅保留既有的大包体积提示。
+
+### Notes
+
+- `progress.md`：追加本次 GitHub 同步前的全量验证与范围说明。
+- 回滚方式：删除本节追加日志即可；验证和 Git 推送操作不修改数据库、用户卡片或本机私有配置。

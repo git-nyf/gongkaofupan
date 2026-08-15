@@ -195,6 +195,51 @@ describe('错题积累图片轮播', () => {
     expect(screen.getByText('3 张错题')).toBeInTheDocument();
   });
 
+  it('地址锚点会展开板块并定位非默认小板块中的图片', async () => {
+    const statisticsSection = section('section-statistics', '数量关系');
+    const target = reviewImage('target', 'target.png', statisticsSection.id);
+    const targetBoard = board('board-data', '资料', [generalSection, statisticsSection]);
+    const previousUrl = window.location.href;
+    const previousScrollIntoView = Object.getOwnPropertyDescriptor(
+      HTMLElement.prototype,
+      'scrollIntoView',
+    );
+    const scrollIntoView = vi.fn();
+    const requestAnimationFrame = vi.fn((callback: FrameRequestCallback) => {
+      callback(0);
+      return 0;
+    });
+
+    try {
+      window.history.replaceState(null, '', '/review#review-item-target');
+      Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', {
+        configurable: true,
+        value: scrollIntoView,
+        writable: true,
+      });
+      vi.stubGlobal('requestAnimationFrame', requestAnimationFrame);
+      mockLoadedImages([reviewImage('default', 'default.png'), target], [targetBoard]);
+      render(<ReviewPage />);
+
+      const targetImage = await screen.findByRole('img', { name: '错题图片 target.png' });
+      const targetFigure = targetImage.closest('figure');
+      expect(screen.getByRole('tab', { name: '数量关系' })).toHaveAttribute('aria-selected', 'true');
+      expect(targetFigure).toHaveAttribute('id', 'review-item-target');
+      expect(targetFigure).toHaveAttribute('aria-label', '复盘条目 target.png');
+      expect(targetFigure).toHaveClass('is-link-target');
+      expect(targetFigure).toHaveAttribute('data-active', 'true');
+      expect(scrollIntoView).toHaveBeenCalledWith({ behavior: 'smooth', block: 'center' });
+      expect(requestAnimationFrame).toHaveBeenCalled();
+    } finally {
+      window.history.replaceState(null, '', previousUrl);
+      if (previousScrollIntoView) {
+        Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', previousScrollIntoView);
+      } else {
+        delete (HTMLElement.prototype as Partial<HTMLElement>).scrollIntoView;
+      }
+    }
+  });
+
   it('每个大板块默认完全展开并用唯一内容容器表达 ARIA 关系', async () => {
     const speechSection = section('section-speech', '中心理解');
     const speechBoard = board('board-speech', '言语', [speechSection]);

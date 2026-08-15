@@ -112,6 +112,117 @@ export interface CardFolderContents {
   cards: CardDetail[];
 }
 
+export type ShenlunReviewTemplate = 200 | 400 | 800 | 1000;
+export type ShenlunReviewTextColor = 'red' | 'blue' | 'green';
+export type ShenlunReviewMarkType = 'bold' | 'underline' | 'strike' | 'color';
+
+export interface ShenlunReviewMark {
+  id: string;
+  type: ShenlunReviewMarkType;
+  color?: ShenlunReviewTextColor;
+  start: number;
+  end: number;
+}
+
+export interface ShenlunReviewAnnotation {
+  id: string;
+  start: number;
+  end: number;
+  quote: string;
+  body: string;
+  createdAt: string;
+  detached: boolean;
+}
+
+export interface ShenlunReviewWriteInput {
+  title: string;
+  template: ShenlunReviewTemplate;
+  text: string;
+  marks: ShenlunReviewMark[];
+  notes: string;
+  standardAnswer: string;
+  annotations: ShenlunReviewAnnotation[];
+}
+
+export interface ShenlunReviewSummary {
+  id: string;
+  title: string;
+  template: ShenlunReviewTemplate;
+  excerpt: string;
+  characterCount: number;
+  pinned: boolean;
+  archived: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ShenlunReviewDetail extends ShenlunReviewWriteInput {
+  id: string;
+  pinned: boolean;
+  archived: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface KnowledgeMapSummary {
+  id: string;
+  name: string;
+  nodeCount: number;
+  edgeCount: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface KnowledgeMapNode {
+  id: string;
+  mapId: string;
+  cardId: string | null;
+  title: string;
+  content: string;
+  level: number;
+  x: number;
+  y: number;
+  z: number;
+  createdAt: string;
+  updatedAt: string;
+  card: CardDetail | null;
+}
+
+export interface KnowledgeMapEdge {
+  id: string;
+  mapId: string;
+  sourceNodeId: string;
+  targetNodeId: string;
+  label: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface KnowledgeMapDetail {
+  map: KnowledgeMapSummary;
+  nodes: KnowledgeMapNode[];
+  edges: KnowledgeMapEdge[];
+}
+
+export interface KnowledgeMapCreateNodeInput {
+  cardId?: string | null;
+  title?: string;
+  content?: string;
+  level?: number;
+  x: number;
+  y: number;
+  z: number;
+}
+
+export interface KnowledgeMapUpdateNodeInput {
+  title?: string;
+  content?: string;
+  level?: number;
+  x?: number;
+  y?: number;
+  z?: number;
+}
+
 export interface CardSearchInput {
   contentVersion: 'optimized' | 'original';
   query: string;

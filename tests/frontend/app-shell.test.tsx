@@ -14,14 +14,18 @@ import { diyThemeStorageKey } from '../../src/theme/diyTheme';
 const appShellSource = readFileSync('src/components/AppShell.tsx', 'utf8');
 const appShellGlassCss = readFileSync('src/styles/app-shell-glass.css', 'utf8');
 
-const routes = [
+const navigationRoutes = [
   { label: '总览', path: '/', heading: '总览' },
   { label: '录入', path: '/entry', heading: '录入' },
   { label: '背诵', path: '/study', heading: '背诵' },
   { label: '卡片库', path: '/cards', heading: '卡片库' },
   { label: '复盘', path: '/review', heading: '错题积累' },
+  { label: '申论', path: '/shenlun', heading: '申论' },
+  { label: '图谱', path: '/graphs', heading: '球状知识图谱' },
   { label: '设置', path: '/settings', heading: '设置' },
 ] as const;
+
+const pageRoutes = navigationRoutes.filter(({ path }) => path !== '/graphs');
 
 beforeEach(() => {
   window.localStorage.clear();
@@ -36,10 +40,10 @@ afterEach(() => {
 });
 
 describe('桌面工作台', () => {
-  it('提供六个固定入口及正确链接', () => {
+  it('提供固定入口及正确链接', () => {
     render(<App />);
 
-    for (const route of routes) {
+    for (const route of navigationRoutes) {
       expect(screen.getByRole('link', { name: route.label })).toHaveAttribute(
         'href',
         route.path,
@@ -47,7 +51,16 @@ describe('桌面工作台', () => {
     }
   });
 
-  it.each(routes)('在 $path 显示$heading页面', ({ heading, path }) => {
+  it('把图谱入口放在设置前', () => {
+    const { container } = render(<App />);
+
+    const labels = [...container.querySelectorAll<HTMLElement>('.app-shell__nav-link')]
+      .map((link) => link.getAttribute('aria-label'));
+
+    expect(labels).toEqual(navigationRoutes.map(({ label }) => label));
+  });
+
+  it.each(pageRoutes)('在 $path 显示$heading页面', ({ heading, path }) => {
     window.history.pushState({}, '', path);
 
     render(<App />);
@@ -86,7 +99,7 @@ describe('桌面工作台', () => {
     expect(expandButton).toHaveAttribute('aria-expanded', 'false');
     expect(expandButton).toHaveFocus();
     expect(container.querySelector('.app-shell__brand-copy')).not.toBeInTheDocument();
-    for (const route of routes) {
+    for (const route of navigationRoutes) {
       const link = screen.getByRole('link', { name: route.label });
       expect(link.querySelector('.app-shell__nav-label')).not.toBeInTheDocument();
     }

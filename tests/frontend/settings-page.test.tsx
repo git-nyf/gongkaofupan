@@ -284,4 +284,32 @@ describe('体验设置', () => {
     }));
     expect(await screen.findByRole('alert')).toHaveTextContent('请在设置中填写 QQMusic.exe 路径');
   });
+
+  it('可以立即生成十张初始稿 Anki 卡并请求 cc-connect 发送', async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const requestPath = String(input);
+      if (requestPath === '/api/anki/daily') {
+        return new Response(JSON.stringify({
+          status: 'generated',
+          count: 10,
+          sent: true,
+        }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      }
+      return new Response(JSON.stringify(settingsResponse), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const user = userEvent.setup();
+    render(<SettingsPage />);
+
+    await user.click(await screen.findByRole('button', { name: '生成并发送今日 Anki' }));
+
+    expect(fetchMock).toHaveBeenCalledWith('/api/anki/daily', expect.objectContaining({
+      method: 'POST',
+      body: JSON.stringify({ count: 10, send: true }),
+    }));
+    expect(await screen.findByRole('status')).toHaveTextContent('今日 10 张 Anki 复习卡已发送');
+  });
 });
