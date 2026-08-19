@@ -20,6 +20,11 @@ import { sendAnkiBundle } from './anki/sender';
 import { createAnkiLibraryExportService } from './anki/libraryExports';
 import { createAnkiAutoSendService } from './anki/autoSend';
 import { createShenlunReviewService } from './shenlunReviews';
+import { createCoachDeepSeekProvider } from './coach/deepseek';
+import { createHuashengAdapter } from './coach/huasheng';
+import { createWebSearchAdapter } from './coach/webSearch';
+import { createZhangGongAdapter } from './coach/zhangGong';
+import { createCoachService } from './coach';
 
 const config = readConfig();
 mkdirSync(config.dataDir, { recursive: true });
@@ -67,6 +72,17 @@ const ankiAutoSendService = createAnkiAutoSendService({
   dailyService: dailyAnkiService,
 });
 const shenlunReviewService = createShenlunReviewService({ database: databaseManager });
+const coachService = createCoachService({
+  cardService,
+  aiProvider: createCoachDeepSeekProvider({
+    apiKey: config.deepseek.apiKey,
+    baseUrl: config.deepseek.baseUrl,
+    model: config.deepseek.model,
+  }),
+  huasheng: createHuashengAdapter({ url: config.coach.huashengMcpUrl }),
+  zhangGong: createZhangGongAdapter({ directory: config.coach.zhangGongSkillDirectory }),
+  webSearch: createWebSearchAdapter({ apiKey: config.coach.tavilyApiKey }),
+});
 const app = createApp({
   cardService,
   studyService,
@@ -83,6 +99,7 @@ const app = createApp({
   reviewImageService,
   knowledgeMapService,
   shenlunReviewService,
+  coachService,
   ankiRouter: createAnkiRouter(dailyAnkiService, ankiLibraryExportService),
 });
 

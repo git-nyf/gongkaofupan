@@ -19,6 +19,7 @@ import { createReviewImageRouter, type ReviewImageService } from './reviewImages
 import { createKnowledgeMapRouter } from './knowledgeMaps/routes';
 import type { KnowledgeMapService } from './knowledgeMaps/service';
 import { createShenlunReviewRouter, type ShenlunReviewService } from './shenlunReviews';
+import { createCoachRouter, type CoachService } from './coach';
 
 interface AppDependencies {
   cardService?: CardService;
@@ -33,6 +34,7 @@ interface AppDependencies {
   knowledgeMapService?: KnowledgeMapService;
   shenlunReviewService?: ShenlunReviewService;
   ankiRouter?: Router;
+  coachService?: CoachService;
 }
 
 export function createApp({
@@ -48,6 +50,7 @@ export function createApp({
   knowledgeMapService,
   shenlunReviewService,
   ankiRouter,
+  coachService,
 }: AppDependencies = {}) {
   const app = express();
 
@@ -102,6 +105,10 @@ export function createApp({
 
   if (ankiRouter) {
     app.use(ankiRouter);
+  }
+
+  if (coachService) {
+    app.use('/api/coach', createCoachRouter(coachService));
   }
 
   const clientDir = resolve(process.cwd(), 'dist/client');
