@@ -371,3 +371,56 @@ export interface AppSettings {
   qqMusicAvailable: boolean;
   deepseekConfigured: boolean;
 }
+
+export type CoachMode = 'auto' | 'logic' | 'data' | 'quantity' | 'verbal';
+export type CoachModule = Exclude<CoachMode, 'auto'>;
+export type CoachTeacher = 'huasheng13' | 'zhang_gong';
+export type CoachCapabilityState = 'ready' | 'not_configured' | 'unavailable';
+
+export interface CoachStatus {
+  deepseek: CoachCapabilityState;
+  huasheng: CoachCapabilityState;
+  zhangGong: CoachCapabilityState;
+  webSearch: CoachCapabilityState;
+}
+
+export interface CoachConversationMessage {
+  role: 'user' | 'assistant';
+  content: string;
+}
+
+export interface CoachMessageInput {
+  mode: CoachMode;
+  messages: CoachConversationMessage[];
+  cardId?: string;
+  includeWebSearch: boolean;
+}
+
+export interface CoachMethodReference {
+  id: string;
+  name: string;
+  source: CoachTeacher;
+  summary: string;
+}
+
+export interface CoachWebSource {
+  title: string;
+  url: string;
+  domain: string;
+  summary: string;
+}
+
+export interface CoachResponse {
+  resolvedModule: CoachModule;
+  teacher: CoachTeacher;
+  questionType: string;
+  answer: string;
+  steps: string[];
+  conclusion: string;
+  pitfalls: string[];
+  followUps: string[];
+  trainingPlan: string[];
+  methodReferences: CoachMethodReference[];
+  sources: CoachWebSource[];
+  webSearchStatus: 'ready' | 'disabled' | 'failed' | 'empty';
+}

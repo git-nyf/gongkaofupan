@@ -175,6 +175,11 @@ describe('应用配置', () => {
         ccConnectCommand: 'cc-connect',
         ccConnectDataDirectory: undefined,
       },
+      coach: {
+        huashengMcpUrl: 'http://127.0.0.1:8000/sse',
+        zhangGongSkillDirectory: undefined,
+        tavilyApiKey: '',
+      },
     });
 
     expect(() => readConfig({ DEEPSEEK_MODEL: 'other-model' })).toThrow();
@@ -187,5 +192,17 @@ describe('应用配置', () => {
   it('读取 cc-connect 数据目录配置', () => {
     expect(readConfig({ CC_CONNECT_DATA_DIR: 'D:\\cc-connect\\cc-connect-data' }).anki.ccConnectDataDirectory)
       .toBe(resolve('D:\\cc-connect\\cc-connect-data'));
+  });
+
+  it('读取 AI 公考教练显式配置', () => {
+    expect(readConfig({
+      HUASHENG_MCP_URL: 'https://coach.example.com/sse',
+      ZHANG_GONG_SKILL_DIR: './skills/zhang-gong',
+      TAVILY_API_KEY: 'test-tavily-key',
+    }).coach).toEqual({
+      huashengMcpUrl: 'https://coach.example.com/sse',
+      zhangGongSkillDirectory: resolve(testRoot, 'skills/zhang-gong'),
+      tavilyApiKey: 'test-tavily-key',
+    });
   });
 });

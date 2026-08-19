@@ -11,6 +11,9 @@ const envSchema = z.object({
   ANKI_OUTPUT_DIR: z.string().min(1).default('./output/anki'),
   CC_CONNECT_COMMAND: z.string().min(1).default('cc-connect'),
   CC_CONNECT_DATA_DIR: z.string().default(''),
+  HUASHENG_MCP_URL: z.string().url().default('http://127.0.0.1:8000/sse'),
+  ZHANG_GONG_SKILL_DIR: z.string().default(''),
+  TAVILY_API_KEY: z.string().default(''),
 });
 
 export function readConfig(env: NodeJS.ProcessEnv = process.env) {
@@ -31,6 +34,13 @@ export function readConfig(env: NodeJS.ProcessEnv = process.env) {
       ccConnectDataDirectory: parsed.CC_CONNECT_DATA_DIR.trim()
         ? resolve(parsed.CC_CONNECT_DATA_DIR)
         : undefined,
+    },
+    coach: {
+      huashengMcpUrl: parsed.HUASHENG_MCP_URL,
+      zhangGongSkillDirectory: parsed.ZHANG_GONG_SKILL_DIR.trim()
+        ? resolve(parsed.ZHANG_GONG_SKILL_DIR)
+        : undefined,
+      tavilyApiKey: parsed.TAVILY_API_KEY,
     },
   };
 }
