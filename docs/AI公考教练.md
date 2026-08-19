@@ -39,14 +39,39 @@ TAVILY_API_KEY=你的密钥
 
 ## 启动花生十三 MCP
 
-在独立的 Python 环境中安装并启动服务：
+项目已经预留本地目录：
 
-```powershell
-pip install "xingce-solver[sse]"
-xingce-solver-mcp-sse
+```text
+local-tools/skills/huasheng13/   花生十三 Skill 本地副本
+local-tools/huasheng-mcp/        花生十三 MCP 源码本地副本
+local-tools/.venv/               项目专用 Python 环境
 ```
 
-默认配置连接 `http://127.0.0.1:8000/sse`。如果 MCP 使用其他地址，应同步修改 `HUASHENG_MCP_URL`，然后重启本项目服务端。
+首次安装或更新时，在项目根目录执行：
+
+```powershell
+.\scripts\setup-coach-local.ps1
+```
+
+该脚本会把花生十三 Skill 与 MCP 浅克隆到 `local-tools/`，创建项目专用 Python 环境并安装 SSE 依赖。再次运行时只做快进更新，不覆盖来源不明的同名目录；同时会幂等修正当前上游版本的 `question_text` 路由兼容问题。
+
+本项目提供了 Windows 启动脚本，推荐直接运行：
+
+```powershell
+.\scripts\start-huasheng-mcp.ps1
+```
+
+脚本默认只监听 `127.0.0.1:8000`，并提供标准 SSE 地址 `http://127.0.0.1:8000/sse`。如果需要手动启动，也可以使用：
+
+```powershell
+local-tools/.venv/Scripts/python.exe -m uvicorn mcp_server.server:app --host 127.0.0.1 --port 8000
+```
+
+默认配置连接 `http://127.0.0.1:8000/sse`。如果 MCP 使用其他地址，应同步修改 `HUASHENG_MCP_URL`，然后重启本项目服务端。上游包的命令入口在当前版本声明不完整，因此使用项目脚本直接启动 `uvicorn` 应用。
+
+## 张弓 Skill
+
+本次公开检索没有找到能够确认来源、目录契约和授权范围的张弓 Skill 或 MCP 仓库，因此项目不会下载其他言语资料冒充张弓方法。取得本人授权或自建的张弓 Skill 后，将其放在项目本地目录，并把 `ZHANG_GONG_SKILL_DIR` 指向包含 `SKILL.md` 的目录；在此之前，言语理解会保持“未配置”，不会影响花生十三负责的判断推理、资料分析和数量关系。
 
 ## 能力状态
 

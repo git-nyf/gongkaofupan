@@ -5048,3 +5048,31 @@
 - `docs/AI公考教练.md`：补充新增边界和使用说明。
 - `progress.md`：追加本轮修复、验证与回滚说明。
 - 回滚方式：反向应用本轮修复提交，恢复此前教练适配器、模型提供者、联网搜索和页面行为；本轮未修改数据库、用户卡片或本机私有 `.env`。
+
+## 2026-08-19 - Task: 将公考教练依赖拉取到项目本地并提供安装启动脚本
+
+### What was done
+
+- 将花生十三 Skill 与花生 MCP 浅克隆到项目 `local-tools/`，创建项目专用 Python 虚拟环境并安装 SSE 扩展。
+- 增加幂等安装脚本和 Windows MCP 启动脚本；安装脚本会快进更新两个来源，并对当前上游 `question_text` 路由参数做已知形态兼容修正。
+- 更新教练使用文档，明确一条命令安装方式、能力状态和张弓 Skill 的来源边界；未使用未经确认的言语资料替代张弓方法。
+
+### Testing
+
+- `npx vitest run tests/server/coach-local-setup.test.ts`：3/3 通过。
+- `npm run typecheck`：通过。
+- 两个 PowerShell 脚本解析检查：通过。
+- 实际执行 `scripts/setup-coach-local.ps1`：退出码 0，依赖安装完成。
+- 本地 MCP 清单：标准 SSE 服务启动，返回 15 个工具。
+- 实际 `/api/coach/messages` 数量题：返回数量模块、花生十三老师、`B.6天`、7 个步骤和 4 项训练计划。
+- `git diff --check`：通过，仅有 Windows 换行提示。
+
+### Notes
+
+- `.gitignore`：忽略项目本地 `local-tools/` 依赖目录。
+- `scripts/setup-coach-local.ps1`：新增本地 Skill/MCP 安装、更新和兼容修正脚本。
+- `scripts/start-huasheng-mcp.ps1`：新增本地花生 MCP SSE 启动脚本。
+- `tests/server/coach-local-setup.test.ts`：覆盖浅克隆、虚拟环境、SSE 安装和幂等修正契约。
+- `docs/AI公考教练.md`：改为一条命令安装，并记录张弓 Skill 未找到可确认公开仓库的边界。
+- `progress.md`：追加本轮实现、验证和回滚记录。
+- 回滚点：本轮提交完成后执行 `git revert <本轮提交SHA>`；停止 MCP 后可删除明确路径 `local-tools/`，不会影响数据库、卡片内容或 `.env`。

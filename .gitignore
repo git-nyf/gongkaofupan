@@ -18,5 +18,6 @@ backups/
 .playwright-cli/
 .superpowers/
 output/
+local-tools/
 playwright-report/
 test-results/
