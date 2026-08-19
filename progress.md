@@ -4958,3 +4958,45 @@
 - `server/app.ts`、`server/index.ts`：挂载教练路由并创建生产依赖。
 - `tests/server/coach-service.test.ts`、`tests/server/coach-routes.test.ts`：覆盖路由分工、上下文边界、降级和接口错误映射。
 - 回滚方式：反向应用提交 `27d5ec0`，恢复服务端入口并删除教练服务、路由与测试；本轮未修改数据库、用户卡片或本机私有 `.env`。
+
+## 2026-08-19 - Task: 完成 AI 公考教练页面
+### What was done
+
+- 新增 Apple 风格玻璃教练工作区，支持五种模块模式、四项能力状态、连续对话、卡片模糊搜索、联网开关和结构化训练辅助。
+- 支持 `Ctrl+Enter` 发送、输入法组合态保护、`Escape` 中止并保留草稿、请求期间防重复提交，以及窄屏单列布局和透明度/动效降级。
+- 来源、方法卡、易错点、训练计划和联网失败状态分别呈现，外链保留可点击地址。
+
+### Testing
+
+- TDD 红灯：页面文件不存在时目标测试无法解析组件。
+- `npx vitest run tests/frontend/coach-page.test.tsx`：通过，6 项测试全部通过。
+- `npx vitest run tests/frontend/app-shell.test.tsx tests/frontend/coach-route.test.tsx`：通过，27 项测试全部通过。
+- `npm test -- --run`：通过，66 个测试文件、914 项测试全部通过。
+- `npm run typecheck`：通过；`npm run build`：客户端与服务端构建通过，仅保留既有大包体积提示；`git diff --check`：通过。
+
+### Notes
+
+- `src/pages/CoachPage.tsx`：新增教练对话与训练辅助页面。
+- `src/styles/coach.css`：新增玻璃界面、响应式布局和可访问性降级样式。
+- `tests/frontend/coach-page.test.tsx`：覆盖页面状态、快捷键、卡片搜索、响应展示和 CSS 契约。
+- 回滚方式：反向应用提交 `6c4bfaa`，删除教练页面、样式和页面测试；本轮未修改数据库、用户卡片或本机私有 `.env`。
+
+## 2026-08-19 - Task: 接入 AI 公考教练导航与文档
+### What was done
+
+- 在背诵入口之后增加“教练”导航和 `/coach` 路由，保持其他页面路径与顺序不变。
+- 新增中文使用文档，说明老师分工、配置、花生 MCP 启动、状态降级、快捷键、卡片边界、联网题源和局域网部署边界。
+
+### Testing
+
+- TDD 红灯：新增路由测试在入口尚未接入时无法匹配 `/coach`。
+- `npx vitest run tests/frontend/app-shell.test.tsx tests/frontend/coach-route.test.tsx`：通过，27 项测试全部通过。
+- `npm run typecheck`：通过；`git diff --check`：通过。
+
+### Notes
+
+- `src/App.tsx`：增加 `/coach` 路由。
+- `src/components/AppShell.tsx`：增加“教练”导航和 `MessagesSquare` 图标。
+- `tests/frontend/app-shell.test.tsx`、`tests/frontend/coach-route.test.tsx`：覆盖导航顺序、链接和路由渲染。
+- `docs/AI公考教练.md`：新增中文配置与使用说明。
+- 回滚方式：反向应用提交 `74c5820`，恢复入口文件并删除路由测试与使用文档；本轮未修改数据库、用户卡片或本机私有 `.env`。
