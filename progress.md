@@ -5023,3 +5023,28 @@
 - `output/playwright/coach-mobile.png`：保存移动端教练页面验收截图。
 - `progress.md`：追加本轮浏览器验收证据与回滚说明。
 - 回滚方式：反向应用提交 `cdbbc0f` 及其之前本轮教练功能提交，删除教练页面、服务、适配器、测试与文档；本轮未修改数据库、用户卡片或本机私有 `.env`。
+
+## 2026-08-19 - Task: 修复 AI 公考教练外部契约与连续追问边界
+### What was done
+
+- 按花生十三 MCP 真实契约修正数量关系零参数脚手架、判断推理子类型脚手架和嵌套方法卡解析，并为 MCP 连接、工具调用、状态探测和关闭增加 15 秒上限。
+- 为 DeepSeek 增加精确 JSON 输出契约；模型只负责生成解析正文，模块、老师、方法引用、联网来源和搜索状态由服务端可信上下文覆盖。
+- 为 Tavily 增加 15 秒请求上限；前端连续追问裁剪至服务端 20 条消息限制，并在当前能力未就绪时禁用发送并显示原因。
+- 更新教练使用文档，说明判断子类型、请求上限和连续对话边界。
+
+### Testing
+
+- TDD 定向回归：花生适配器 15 项、DeepSeek 14 项、服务与路由 24 项、前端教练页 8 项，共 61 项全部通过。
+- `npm run typecheck`：通过。
+- `npm test -- --run`：通过，66 个测试文件、924 项测试全部通过；首次全量运行中出现的既有复盘图片锚点时序失败在独立重跑与第二次全量运行中均通过。
+- `git diff --check`：通过（仅保留 Windows 换行提示）。
+
+### Notes
+
+- `server/coach/huasheng.ts`、`tests/server/coach-adapters.test.ts`：修正真实花生 MCP 工具参数、脚手架映射、方法卡响应和超时关闭。
+- `server/coach/deepseek.ts`、`server/coach/prompt.ts`、`tests/server/coach-deepseek.test.ts`：增加模型输出契约与可信元数据归一化。
+- `server/coach/webSearch.ts`：增加 Tavily 请求超时。
+- `src/pages/CoachPage.tsx`、`tests/frontend/coach-page.test.tsx`：限制连续消息并禁用不可用能力。
+- `docs/AI公考教练.md`：补充新增边界和使用说明。
+- `progress.md`：追加本轮修复、验证与回滚说明。
+- 回滚方式：反向应用本轮修复提交，恢复此前教练适配器、模型提供者、联网搜索和页面行为；本轮未修改数据库、用户卡片或本机私有 `.env`。

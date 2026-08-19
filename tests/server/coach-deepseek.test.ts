@@ -111,6 +111,27 @@ describe('DeepSeek 教练提供者', () => {
     expect(COACH_SYSTEM_PROMPT).toContain('只输出 JSON');
   });
 
+  it('系统提示词声明精确 JSON 字段、枚举和对象结构', () => {
+    expect(COACH_SYSTEM_PROMPT).toContain('字段必须且只能是');
+    expect(COACH_SYSTEM_PROMPT).toContain('resolvedModule');
+    expect(COACH_SYSTEM_PROMPT).toContain('teacher');
+    expect(COACH_SYSTEM_PROMPT).toContain('questionType');
+    expect(COACH_SYSTEM_PROMPT).toContain('answer');
+    expect(COACH_SYSTEM_PROMPT).toContain('steps');
+    expect(COACH_SYSTEM_PROMPT).toContain('conclusion');
+    expect(COACH_SYSTEM_PROMPT).toContain('pitfalls');
+    expect(COACH_SYSTEM_PROMPT).toContain('followUps');
+    expect(COACH_SYSTEM_PROMPT).toContain('trainingPlan');
+    expect(COACH_SYSTEM_PROMPT).toContain('methodReferences');
+    expect(COACH_SYSTEM_PROMPT).toContain('sources');
+    expect(COACH_SYSTEM_PROMPT).toContain('webSearchStatus');
+    expect(COACH_SYSTEM_PROMPT).toContain('logic | data | quantity | verbal');
+    expect(COACH_SYSTEM_PROMPT).toContain('huasheng13 | zhang_gong');
+    expect(COACH_SYSTEM_PROMPT).toContain('ready | disabled | failed | empty');
+    expect(COACH_SYSTEM_PROMPT).toContain('id、name、source、summary');
+    expect(COACH_SYSTEM_PROMPT).toContain('title、url、domain、summary');
+  });
+
   it('返回经过严格校验的完整结构', async () => {
     const fetchMock = vi
       .fn<typeof fetch>()
@@ -118,6 +139,46 @@ describe('DeepSeek 教练提供者', () => {
     const provider = createCoachDeepSeekProvider(config, fetchMock);
 
     await expect(provider.respond(input)).resolves.toEqual(coachResponse);
+  });
+
+  it('忽略模型伪造的模块、老师、方法、来源和搜索状态', async () => {
+    const modelResponse: CoachResponse = {
+      resolvedModule: 'verbal',
+      teacher: 'zhang_gong',
+      questionType: '言语理解',
+      answer: '选择 A。',
+      steps: ['先找主旨'],
+      conclusion: '模型文本仍需按服务端题型理解。',
+      pitfalls: ['不要凭印象选项'],
+      followUps: ['换一道同类题'],
+      trainingPlan: ['完成 2 道练习'],
+      methodReferences: [
+        { id: 'zg-1', name: '张弓方法', source: 'zhang_gong', summary: '言语方法' },
+      ],
+      sources: [
+        {
+          title: '模型来源',
+          url: 'https://model.example/source',
+          domain: 'model.example',
+          summary: '模型自行填写的 HTTPS 来源',
+        },
+      ],
+      webSearchStatus: 'ready',
+    };
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValue(apiResponse(JSON.stringify(modelResponse)));
+    const provider = createCoachDeepSeekProvider(config, fetchMock);
+
+    await expect(provider.respond(input)).resolves.toMatchObject({
+      resolvedModule: input.resolvedModule,
+      teacher: input.teacher,
+      methodReferences: input.methods,
+      sources: input.search.sources,
+      webSearchStatus: input.search.status,
+      answer: modelResponse.answer,
+      steps: modelResponse.steps,
+    });
   });
 
   it('兼容 JSON 代码块', async () => {

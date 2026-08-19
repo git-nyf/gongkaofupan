@@ -68,8 +68,36 @@ const MODULE_BY_TYPE: Record<string, CoachModule> = {
   verbal_reasoning: 'verbal',
 };
 
+const SCAFFOLD_BY_TYPE: Record<string, string> = {
+  graphic_reasoning: 'get_graphic_reasoning_scaffold',
+  definition_judgement: 'get_definition_judgement_scaffold',
+  analogy_reasoning: 'get_analogy_reasoning_scaffold',
+  logic_analysis: 'get_logic_analysis_scaffold',
+  quantity_relation: 'get_quantity_relation_scaffold',
+};
+
 const MAX_TOOL_FIELD = 8_000;
 const MAX_PROMPT_CONTEXT = 24_000;
+const HUASHENG_OPERATION_TIMEOUT_MS = 15_000;
+
+function withTimeout<T>(operation: Promise<T>): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(
+      () => reject(new Error('Huasheng MCP operation timed out')),
+      HUASHENG_OPERATION_TIMEOUT_MS,
+    );
+    operation.then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      (error) => {
+        clearTimeout(timer);
+        reject(error);
+      },
+    );
+  });
+}
 
 function truncate(value: string, maxLength: number): string {
   return value.length > maxLength ? `${value.slice(0, maxLength)}…` : value;
@@ -138,11 +166,13 @@ function methodResults(value: unknown): Array<Record<string, unknown>> {
 
 function methodReference(value: unknown, fallbackId = 'method'): CoachMethodReference<'huasheng13'> | undefined {
   const parsed = parseToolResult(value);
-  const record = asRecord(parsed);
-  if (!record) return undefined;
-  const id = record.id ?? record.method_id ?? record.methodId ?? fallbackId;
+  const wrapper = asRecord(parsed);
+  if (!wrapper) return undefined;
+  const card = asRecord(wrapper.card);
+  const record = card ?? wrapper;
+  const id = record.id ?? wrapper.method_id ?? record.method_id ?? record.methodId ?? fallbackId;
   const name = record.name ?? record.title ?? record.method_name ?? id;
-  const summary = record.summary ?? record.description ?? record.content ?? '';
+  const summary = record.summary ?? record.description ?? record.content ?? (card ? card : '');
   if (typeof id !== 'string' || typeof name !== 'string') return undefined;
   return {
     id,
@@ -156,7 +186,12 @@ function createProductionClient(url: string): () => Promise<McpToolClient> {
   return async () => {
     const client = new Client({ name: 'gongkao-coach', version: '0.1.0' }, { capabilities: {} });
     const transport = new SSEClientTransport(new URL(url));
-    await client.connect(transport);
+    try {
+      await withTimeout(client.connect(transport));
+    } catch (error) {
+      await withTimeout(client.close()).catch(() => undefined);
+      throw error;
+    }
     return {
       listTools: async () => (await client.listTools()).tools.map(({ name }) => ({ name })),
       callTool: async (name, args) => client.callTool({ name, arguments: args }),
@@ -176,7 +211,7 @@ export function createHuashengAdapter(options: HuashengAdapterOptions): Huasheng
 
   const call = async (client: McpToolClient, name: string, args: Record<string, unknown>) => {
     try {
-      const result = await client.callTool(name, args);
+      const result = await withTimeout(client.callTool(name, args));
       if (asRecord(result)?.isError === true) throw new Error('MCP tool returned an error');
       return result;
     } catch (error) {
@@ -188,7 +223,7 @@ export function createHuashengAdapter(options: HuashengAdapterOptions): Huasheng
     if (!options.url) throw new HuashengError('unavailable', '花生方法源未配置');
     let client: McpToolClient | undefined;
     try {
-      client = await clientFactory();
+      client = await withTimeout(Promise.resolve(clientFactory()));
       let questionType: string | undefined;
       if (mode === 'auto') {
         questionType = routeType(await call(client, 'route_xingce_question', { question_text: question }));
@@ -209,9 +244,9 @@ export function createHuashengAdapter(options: HuashengAdapterOptions): Huasheng
         return { module, questionType, methods: [], promptContext: '' };
       }
 
-      const scaffoldName = module === 'quantity' ? 'get_quantity_relation_scaffold' : undefined;
+      const scaffoldName = SCAFFOLD_BY_TYPE[questionType];
       const scaffold = scaffoldName
-        ? await call(client, scaffoldName, { question_text: question })
+        ? await call(client, scaffoldName, {})
         : undefined;
       const methodResponse = await call(client, 'search_methods', {
         query: question,
@@ -261,7 +296,7 @@ export function createHuashengAdapter(options: HuashengAdapterOptions): Huasheng
       if (safeError.code !== 'route_uncertain') lastStatus = 'unavailable';
       throw safeError;
     } finally {
-      if (client) await client.close().catch(() => undefined);
+      if (client) await withTimeout(client.close()).catch(() => undefined);
     }
   };
 
@@ -272,12 +307,12 @@ export function createHuashengAdapter(options: HuashengAdapterOptions): Huasheng
       if (!options.url) return 'not_configured';
       if (lastStatus === 'unavailable') return lastStatus;
       try {
-        const client = await clientFactory();
+        const client = await withTimeout(Promise.resolve(clientFactory()));
         try {
-          await client.listTools();
+          await withTimeout(client.listTools());
           lastStatus = 'ready';
         } finally {
-          await client.close().catch(() => undefined);
+          await withTimeout(client.close()).catch(() => undefined);
         }
       } catch {
         lastStatus = 'unavailable';

@@ -16,9 +16,11 @@ export interface WebSearchAdapter {
 export interface WebSearchAdapterOptions {
   apiKey: string;
   fetchImpl?: typeof fetch;
+  timeoutMs?: number;
 }
 
 const TAVILY_URL = 'https://api.tavily.com/search';
+const DEFAULT_TIMEOUT_MS = 15_000;
 
 function truncate(value: string, maxLength: number): string {
   return value.length > maxLength ? `${value.slice(0, maxLength)}…` : value;
@@ -54,13 +56,17 @@ function sourceFrom(value: unknown): CoachWebSource | undefined {
 export function createWebSearchAdapter(options: WebSearchAdapterOptions): WebSearchAdapter {
   const fetchImpl = options.fetchImpl ?? fetch;
   const apiKey = options.apiKey.trim();
+  const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
 
   const search = async (query: string): Promise<WebSearchResult> => {
     if (!apiKey) return { status: 'disabled', sources: [] };
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), timeoutMs);
     try {
       const response = await fetchImpl(TAVILY_URL, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
+        signal: controller.signal,
         body: JSON.stringify({
           api_key: apiKey,
           query,
@@ -87,6 +93,8 @@ export function createWebSearchAdapter(options: WebSearchAdapterOptions): WebSea
         : { status: 'empty', sources: [] };
     } catch {
       return { status: 'failed', sources: [] };
+    } finally {
+      clearTimeout(timeout);
     }
   };
 

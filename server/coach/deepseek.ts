@@ -162,9 +162,20 @@ export function createCoachDeepSeekProvider(
 
       const result = coachResponseSchema.safeParse(parsed);
       if (!result.success) throw new CoachDeepSeekError('invalid_schema');
-      return result.data;
+      return normalizeResponse(result.data, input);
     },
   };
+}
+
+function normalizeResponse(response: CoachResponse, input: CoachAiInput): CoachResponse {
+  return {
+    ...response,
+    resolvedModule: input.resolvedModule,
+    teacher: input.teacher,
+    methodReferences: input.methods,
+    sources: input.search.sources,
+    webSearchStatus: input.search.status,
+  } as CoachResponse;
 }
 
 function readContent(payload: unknown): string | null {

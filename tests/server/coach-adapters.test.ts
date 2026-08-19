@@ -74,7 +74,10 @@ describe('教练外部能力适配器', () => {
           return textResult({ results: [{ method_id: 'q-1', name: '工程问题', summary: '统一总量' }] });
         }
         if (name === 'get_method_card') {
-          return textResult({ id: 'q-1', name: '工程问题', summary: '统一总量' });
+          return textResult({
+            method_id: 'q-1',
+            card: { id: 'q-1', method_name: '工程问题', summary: '统一总量' },
+          });
         }
         throw new Error(`unexpected tool: ${name}`);
       }),
@@ -88,13 +91,70 @@ describe('教练外部能力适配器', () => {
     ]);
     expect(context.promptContext).toContain('统一工作总量后列式');
     expect(calls).toEqual([
-      { name: 'get_quantity_relation_scaffold', args: { question_text: '甲乙合作完成工程问题' } },
+      { name: 'get_quantity_relation_scaffold', args: {} },
       {
         name: 'search_methods',
         args: { query: '甲乙合作完成工程问题', module: 'quantity', top_k: 3 },
       },
       { name: 'get_method_card', args: { method_id: 'q-1' } },
     ]);
+  });
+
+  it.each([
+    ['graphic_reasoning', 'get_graphic_reasoning_scaffold'],
+    ['definition_judgement', 'get_definition_judgement_scaffold'],
+    ['analogy_reasoning', 'get_analogy_reasoning_scaffold'],
+    ['logic_analysis', 'get_logic_analysis_scaffold'],
+  ])('uses the dedicated zero-argument scaffold for auto-routed %s', async (questionType, scaffoldName) => {
+    const calls: Array<{ name: string; args: Record<string, unknown> }> = [];
+    const adapter = createHuashengAdapter({
+      url: 'http://127.0.0.1:8000/sse',
+      clientFactory: async () => fakeMcp(async (name, args) => {
+        calls.push({ name, args });
+        if (name === 'route_xingce_question') return textResult({ module_guess: questionType });
+        if (name === scaffoldName) return textResult({ scaffold: `${questionType} scaffold` });
+        if (name === 'search_methods') return textResult({ results: [] });
+        throw new Error(`unexpected tool: ${name}`);
+      }),
+    });
+
+    const context = await adapter.load({ mode: 'auto', question: 'auto-routed logic question' });
+
+    expect(context.questionType).toBe(questionType);
+    expect(context.promptContext).toContain(`${questionType} scaffold`);
+    expect(calls).toEqual([
+      { name: 'route_xingce_question', args: { question_text: 'auto-routed logic question' } },
+      { name: scaffoldName, args: {} },
+      {
+        name: 'search_methods',
+        args: { query: 'auto-routed logic question', module: 'logic', top_k: 3 },
+      },
+    ]);
+  });
+
+  it('times out a stalled Huasheng tool call and still closes the client', async () => {
+    vi.useFakeTimers();
+    try {
+      const close = vi.fn(async () => undefined);
+      const adapter = createHuashengAdapter({
+        url: 'http://127.0.0.1:8000/sse',
+        clientFactory: async () => ({
+          listTools: async () => [],
+          callTool: async () => new Promise<never>(() => undefined),
+          close,
+        }),
+      });
+
+      const pending = adapter.load({ mode: 'logic', question: 'stalled tool call' });
+      const rejection = pending.then(() => undefined, (error) => error);
+      await vi.advanceTimersByTimeAsync(0);
+      await vi.advanceTimersByTimeAsync(20_000);
+
+      await expect(rejection).resolves.toMatchObject({ code: 'unavailable' });
+      expect(close).toHaveBeenCalledOnce();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('花生 solver 使用 question_text 参数', async () => {
@@ -208,5 +268,38 @@ describe('教练外部能力适配器', () => {
       fetchImpl: vi.fn<typeof fetch>(async () => new Response('bad gateway', { status: 502 })),
     });
     await expect(failed.search('题目')).resolves.toEqual({ status: 'failed', sources: [] });
+  });
+
+  it('aborts a stalled Tavily request after the configured timeout', async () => {
+    vi.useFakeTimers();
+    try {
+      let requestSignal: AbortSignal | null | undefined;
+      const fetchImpl = vi.fn<typeof fetch>(async (_input, init) => {
+        requestSignal = init?.signal;
+        return new Promise<Response>((_resolve, reject) => {
+          requestSignal?.addEventListener(
+            'abort',
+            () => reject(new DOMException('Aborted', 'AbortError')),
+            { once: true },
+          );
+        });
+      });
+      const adapter = createWebSearchAdapter({
+        apiKey: 'test-key',
+        fetchImpl,
+        timeoutMs: 15_000,
+      });
+
+      const pending = adapter.search('stalled Tavily request');
+      await vi.advanceTimersByTimeAsync(14_999);
+      expect(fetchImpl).toHaveBeenCalledOnce();
+      expect(requestSignal?.aborted).toBe(false);
+
+      await vi.advanceTimersByTimeAsync(1);
+      await expect(pending).resolves.toEqual({ status: 'failed', sources: [] });
+      expect(requestSignal?.aborted).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
