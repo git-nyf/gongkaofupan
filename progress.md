@@ -4865,3 +4865,30 @@
 - `docs/superpowers/plans/2026-08-19-AI公考教练实施计划.md`：新增可逐项执行的中文实施计划。
 - `progress.md`：追加本轮计划、验证和回滚说明。
 - 回滚方式：删除本节日志和 `docs/superpowers/plans/2026-08-19-AI公考教练实施计划.md`；本轮未修改运行代码、依赖、数据库或私有配置。
+
+## 2026-08-19 - Task: 增加 AI 公考教练共享契约与配置
+
+### What was done
+
+- 增加教练模式、能力状态、消息、方法来源、联网来源和结构化答复的前后端共享契约，并在类型层锁定花生十三与张弓各自负责的模块。
+- 增加花生 MCP、张弓 Skill 和 Tavily 的服务端环境配置；花生默认连接本机 SSE 地址，张弓目录和 Tavily Key 留空时不启用。
+- 引入官方 MCP TypeScript SDK，并将 Zod 升级到 SDK 兼容的 3.x 版本。
+
+### Testing
+
+- TDD 红灯：新增默认与显式教练配置测试后，原配置因没有 `coach` 字段产生 2 项预期失败。
+- `npx vitest run tests/server/health.test.ts`：通过，覆盖默认值、显式值、HTTP/HTTPS 协议限制、空白规范化和老师来源类型约束。
+- `npm run typecheck`：通过。
+- `npm ls @modelcontextprotocol/sdk zod`：SDK `1.30.0` 与 Zod `3.25.76` 正常去重，无无效或多余依赖。
+- `npx vitest run tests/frontend/cards-page.test.tsx`：通过，83 项测试全部通过；全量运行中曾出现的一次分页失败无法在目标重跑中复现。
+- `git diff --check`：通过。
+
+### Notes
+
+- `shared/contracts.ts`：增加教练共享契约和模块—老师判别联合。
+- `server/config.ts`：增加三项教练配置、HTTP 协议限制和空白规范化。
+- `.env.example`：补充花生 MCP、张弓 Skill 和 Tavily 的中文配置说明。
+- `package.json`、`package-lock.json`：加入官方 MCP SDK并更新兼容的 Zod 版本。
+- `tests/server/health.test.ts`：增加配置和类型约束回归测试。
+- `progress.md`：追加本轮实现、验证与回滚说明。
+- 回滚方式：反向应用本节共享契约、配置、环境示例、依赖与测试差异，执行 `npm install` 恢复锁文件，并删除本节日志；本轮未修改数据库、用户卡片或本机私有 `.env`。

@@ -1,6 +1,11 @@
 import { z } from 'zod';
 import { resolve } from 'node:path';
 
+const httpUrlSchema = z.string().trim().url().refine((value) => {
+  const protocol = new URL(value).protocol;
+  return protocol === 'http:' || protocol === 'https:';
+});
+
 const envSchema = z.object({
   HOST: z.string().min(1).default('127.0.0.1'),
   PORT: z.coerce.number().int().min(1).max(65535).default(8787),
@@ -11,9 +16,9 @@ const envSchema = z.object({
   ANKI_OUTPUT_DIR: z.string().min(1).default('./output/anki'),
   CC_CONNECT_COMMAND: z.string().min(1).default('cc-connect'),
   CC_CONNECT_DATA_DIR: z.string().default(''),
-  HUASHENG_MCP_URL: z.string().url().default('http://127.0.0.1:8000/sse'),
-  ZHANG_GONG_SKILL_DIR: z.string().default(''),
-  TAVILY_API_KEY: z.string().default(''),
+  HUASHENG_MCP_URL: httpUrlSchema.default('http://127.0.0.1:8000/sse'),
+  ZHANG_GONG_SKILL_DIR: z.string().trim().default(''),
+  TAVILY_API_KEY: z.string().trim().default(''),
 });
 
 export function readConfig(env: NodeJS.ProcessEnv = process.env) {
@@ -37,7 +42,7 @@ export function readConfig(env: NodeJS.ProcessEnv = process.env) {
     },
     coach: {
       huashengMcpUrl: parsed.HUASHENG_MCP_URL,
-      zhangGongSkillDirectory: parsed.ZHANG_GONG_SKILL_DIR.trim()
+      zhangGongSkillDirectory: parsed.ZHANG_GONG_SKILL_DIR
         ? resolve(parsed.ZHANG_GONG_SKILL_DIR)
         : undefined,
       tavilyApiKey: parsed.TAVILY_API_KEY,

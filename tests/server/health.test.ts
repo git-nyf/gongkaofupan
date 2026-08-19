@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, expectTypeOf, it } from 'vitest';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { resolve } from 'node:path';
@@ -6,6 +6,7 @@ import type { UserConfig } from 'vite';
 import request from 'supertest';
 import { readConfig } from '../../server/config';
 import { createApp } from '../../server/app';
+import type { CoachResponse } from '../../shared/contracts';
 
 const originalCwd = process.cwd();
 const testRoot = mkdtempSync(resolve(tmpdir(), 'gongkao-static-test-'));
@@ -204,5 +205,37 @@ describe('应用配置', () => {
       zhangGongSkillDirectory: resolve(testRoot, 'skills/zhang-gong'),
       tavilyApiKey: 'test-tavily-key',
     });
+  });
+
+  it('限制花生 MCP 为 HTTP 传输并规范化教练配置空白', () => {
+    for (const huashengMcpUrl of [
+      'ftp://coach.example.com/sse',
+      'file:///tmp/coach',
+      'mailto:test@example.com',
+    ]) {
+      expect(() => readConfig({ HUASHENG_MCP_URL: huashengMcpUrl })).toThrow();
+    }
+
+    expect(readConfig({
+      HUASHENG_MCP_URL: '  https://coach.example.com/sse  ',
+      ZHANG_GONG_SKILL_DIR: '   ',
+      TAVILY_API_KEY: '  test-key  ',
+    }).coach).toEqual({
+      huashengMcpUrl: 'https://coach.example.com/sse',
+      zhangGongSkillDirectory: undefined,
+      tavilyApiKey: 'test-key',
+    });
+  });
+
+  it('在共享契约中锁定模块与老师来源', () => {
+    type VerbalResponse = Extract<CoachResponse, { resolvedModule: 'verbal' }>;
+    type NonVerbalResponse = Exclude<CoachResponse, { resolvedModule: 'verbal' }>;
+
+    expectTypeOf<VerbalResponse['teacher']>().toEqualTypeOf<'zhang_gong'>();
+    expectTypeOf<VerbalResponse['methodReferences'][number]['source']>()
+      .toEqualTypeOf<'zhang_gong'>();
+    expectTypeOf<NonVerbalResponse['teacher']>().toEqualTypeOf<'huasheng13'>();
+    expectTypeOf<NonVerbalResponse['methodReferences'][number]['source']>()
+      .toEqualTypeOf<'huasheng13'>();
   });
 });

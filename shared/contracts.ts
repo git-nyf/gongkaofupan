@@ -396,10 +396,10 @@ export interface CoachMessageInput {
   includeWebSearch: boolean;
 }
 
-export interface CoachMethodReference {
+export interface CoachMethodReference<TSource extends CoachTeacher = CoachTeacher> {
   id: string;
   name: string;
-  source: CoachTeacher;
+  source: TSource;
   summary: string;
 }
 
@@ -410,9 +410,7 @@ export interface CoachWebSource {
   summary: string;
 }
 
-export interface CoachResponse {
-  resolvedModule: CoachModule;
-  teacher: CoachTeacher;
+interface CoachResponseFields<TSource extends CoachTeacher> {
   questionType: string;
   answer: string;
   steps: string[];
@@ -420,7 +418,17 @@ export interface CoachResponse {
   pitfalls: string[];
   followUps: string[];
   trainingPlan: string[];
-  methodReferences: CoachMethodReference[];
+  methodReferences: CoachMethodReference<TSource>[];
   sources: CoachWebSource[];
   webSearchStatus: 'ready' | 'disabled' | 'failed' | 'empty';
 }
+
+export type CoachResponse =
+  | (CoachResponseFields<'huasheng13'> & {
+      resolvedModule: 'logic' | 'data' | 'quantity';
+      teacher: 'huasheng13';
+    })
+  | (CoachResponseFields<'zhang_gong'> & {
+      resolvedModule: 'verbal';
+      teacher: 'zhang_gong';
+    });
