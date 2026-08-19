@@ -5093,6 +5093,7 @@
 - `npm run typecheck`：通过。
 - PowerShell 安装脚本解析：通过。
 - 真实张弓仓库适配器：状态 `ready`，加载 `02-选词填空SOP.md`，提示上下文长度 7992。
+- `8787` 真实言语请求：返回模块 `verbal`、老师 `zhang_gong`、方法“中心理解SOP”和 5 个解析步骤。
 - `git diff --check`：通过，仅有 Windows 换行提示。
 - 当前机器未提供 `TAVILY_API_KEY`，因此未执行真实 Tavily 成功请求；请求契约已用模拟 200、401 和未配置场景验证。
 
