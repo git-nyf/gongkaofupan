@@ -23,13 +23,13 @@ function fakeMcp(callTool: McpToolClient['callTool']): McpToolClient {
 
 describe('教练外部能力适配器', () => {
   it('花生自动路由将 verbal_reasoning 归一为 verbal', async () => {
-    const calls: string[] = [];
+    const calls: Array<{ name: string; args: Record<string, unknown> }> = [];
     const adapter = createHuashengAdapter({
       url: 'http://127.0.0.1:8000/sse',
-      clientFactory: async () => fakeMcp(async (name) => {
-        calls.push(name);
+      clientFactory: async () => fakeMcp(async (name, args) => {
+        calls.push({ name, args });
         if (name === 'route_xingce_question') {
-          return textResult({ question_type: 'verbal_reasoning' });
+          return textResult({ module_guess: 'verbal_reasoning' });
         }
         throw new Error(`unexpected tool: ${name}`);
       }),
@@ -40,17 +40,38 @@ describe('教练外部能力适配器', () => {
     expect(context.module).toBe('verbal');
     expect(context.questionType).toBe('verbal_reasoning');
     expect(context.methods).toEqual([]);
-    expect(calls).toEqual(['route_xingce_question']);
+    expect(calls).toEqual([{
+      name: 'route_xingce_question',
+      args: { question_text: '下列哪项说法正确？' },
+    }]);
   });
 
-  it('花生手动数量模式只请求数量脚手架和方法卡', async () => {
-    const calls: string[] = [];
+  it('花生自动路由不确定时保留可用状态，不误报 unavailable', async () => {
     const adapter = createHuashengAdapter({
       url: 'http://127.0.0.1:8000/sse',
       clientFactory: async () => fakeMcp(async (name) => {
-        calls.push(name);
+        if (name === 'route_xingce_question') return textResult({ module_guess: 'unknown' });
+        throw new Error(`unexpected tool: ${name}`);
+      }),
+    });
+
+    await expect(adapter.load({ mode: 'auto', question: '无法确定题型' })).rejects.toMatchObject({
+      code: 'route_uncertain',
+    });
+    await expect(adapter.getStatus()).resolves.toBe('ready');
+  });
+
+  it('花生手动数量模式按真实契约顺序请求脚手架、方法和方法卡', async () => {
+    const calls: Array<{ name: string; args: Record<string, unknown> }> = [];
+    const adapter = createHuashengAdapter({
+      url: 'http://127.0.0.1:8000/sse',
+      clientFactory: async () => fakeMcp(async (name, args) => {
+        calls.push({ name, args });
         if (name === 'get_quantity_relation_scaffold') {
           return textResult({ scaffold: '统一工作总量后列式' });
+        }
+        if (name === 'search_methods') {
+          return textResult({ results: [{ method_id: 'q-1', name: '工程问题', summary: '统一总量' }] });
         }
         if (name === 'get_method_card') {
           return textResult({ id: 'q-1', name: '工程问题', summary: '统一总量' });
@@ -66,7 +87,34 @@ describe('教练外部能力适配器', () => {
       { id: 'q-1', name: '工程问题', source: 'huasheng13', summary: '统一总量' },
     ]);
     expect(context.promptContext).toContain('统一工作总量后列式');
-    expect(calls).toEqual(['get_quantity_relation_scaffold', 'get_method_card']);
+    expect(calls).toEqual([
+      { name: 'get_quantity_relation_scaffold', args: { question_text: '甲乙合作完成工程问题' } },
+      {
+        name: 'search_methods',
+        args: { query: '甲乙合作完成工程问题', module: 'quantity', top_k: 3 },
+      },
+      { name: 'get_method_card', args: { method_id: 'q-1' } },
+    ]);
+  });
+
+  it('花生 solver 使用 question_text 参数', async () => {
+    const calls: Array<{ name: string; args: Record<string, unknown> }> = [];
+    const adapter = createHuashengAdapter({
+      url: 'http://127.0.0.1:8000/sse',
+      clientFactory: async () => fakeMcp(async (name, args) => {
+        calls.push({ name, args });
+        if (name === 'solve_logic_reasoning') return textResult({ analysis: '识别定义' });
+        if (name === 'search_methods') return textResult({ results: [] });
+        throw new Error(`unexpected tool: ${name}`);
+      }),
+    });
+
+    await adapter.load({ mode: 'logic', question: '这是一道判断题' });
+
+    expect(calls).toEqual([
+      { name: 'search_methods', args: { query: '这是一道判断题', module: 'logic', top_k: 3 } },
+      { name: 'solve_logic_reasoning', args: { question_text: '这是一道判断题' } },
+    ]);
   });
 
   it('花生工具错误只暴露 unavailable，不泄露上游正文', async () => {

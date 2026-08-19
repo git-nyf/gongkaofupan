@@ -115,7 +115,11 @@ function textOf(value: unknown): string {
 function routeType(value: unknown): string | undefined {
   const parsed = parseToolResult(value);
   const record = asRecord(parsed);
-  const candidate = record?.question_type ?? record?.questionType ?? record?.type ?? record?.classification;
+  const candidate = record?.module_guess
+    ?? record?.question_type
+    ?? record?.questionType
+    ?? record?.type
+    ?? record?.classification;
   if (typeof candidate === 'string' && ROUTE_TYPES.has(candidate)) return candidate;
   if (typeof parsed === 'string' && ROUTE_TYPES.has(parsed)) return parsed;
   return undefined;
@@ -187,7 +191,7 @@ export function createHuashengAdapter(options: HuashengAdapterOptions): Huasheng
       client = await clientFactory();
       let questionType: string | undefined;
       if (mode === 'auto') {
-        questionType = routeType(await call(client, 'route_xingce_question', { question }));
+        questionType = routeType(await call(client, 'route_xingce_question', { question_text: question }));
         if (!questionType) throw new HuashengError('route_uncertain', '题型无法确定');
       } else {
         questionType = {
@@ -206,8 +210,14 @@ export function createHuashengAdapter(options: HuashengAdapterOptions): Huasheng
       }
 
       const scaffoldName = module === 'quantity' ? 'get_quantity_relation_scaffold' : undefined;
-      const scaffold = scaffoldName ? await call(client, scaffoldName, { question }) : undefined;
-      const methodResponse = scaffoldName ? undefined : await call(client, 'search_methods', { query: question });
+      const scaffold = scaffoldName
+        ? await call(client, scaffoldName, { question_text: question })
+        : undefined;
+      const methodResponse = await call(client, 'search_methods', {
+        query: question,
+        module,
+        top_k: 3,
+      });
       const candidates = methodResults(methodResponse).slice(0, 3);
       const methods: CoachMethodReference<'huasheng13'>[] = [];
       let promptParts: string[] = [];
@@ -218,24 +228,15 @@ export function createHuashengAdapter(options: HuashengAdapterOptions): Huasheng
         quantity: 'get_quantity_relation_scaffold',
       }[module];
       if (solverName) {
-        const solved = await call(client, solverName, { question });
+        const solved = await call(client, solverName, { question_text: question });
         promptParts.push(truncate(textOf(solved), MAX_TOOL_FIELD));
       }
       if (scaffold) promptParts.push(truncate(textOf(scaffold), MAX_TOOL_FIELD));
-      if (scaffoldName) {
-        const card = await call(client, 'get_method_card', { query: question, module });
-        const cardReference = methodReference(card);
-        if (cardReference) {
-          methods.push(cardReference);
-          promptParts.push(cardReference.summary);
-        }
-      }
       if (candidates.length > 0) {
         const first = methodReference(candidates[0]);
         if (first) {
           methods.push(first);
           const card = await call(client, 'get_method_card', {
-            id: first.id,
             method_id: first.id,
           });
           const cardReference = methodReference(card, first.id);
@@ -257,7 +258,7 @@ export function createHuashengAdapter(options: HuashengAdapterOptions): Huasheng
       };
     } catch (error) {
       const safeError = safeUnavailable(error);
-      lastStatus = safeError.code === 'route_uncertain' ? 'unavailable' : 'unavailable';
+      if (safeError.code !== 'route_uncertain') lastStatus = 'unavailable';
       throw safeError;
     } finally {
       if (client) await client.close().catch(() => undefined);
