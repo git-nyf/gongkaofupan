@@ -5076,3 +5076,34 @@
 - `docs/AI公考教练.md`：改为一条命令安装，并记录张弓 Skill 未找到可确认公开仓库的边界。
 - `progress.md`：追加本轮实现、验证和回滚记录。
 - 回滚点：本轮提交完成后执行 `git revert <本轮提交SHA>`；停止 MCP 后可删除明确路径 `local-tools/`，不会影响数据库、卡片内容或 `.env`。
+
+## 2026-08-20 - Task: 配置张弓言语 Skill 与联网搜索
+
+### What was done
+
+- 将指定的张弓言语 Skill 浅克隆到项目本地，并让教练在未显式配置目录时自动发现该 Skill；显式 `ZHANG_GONG_SKILL_DIR` 仍保持最高优先级。
+- 安装脚本新增张弓仓库的首次拉取和快进更新，言语理解按题型读取中心理解、选词填空或语句表达参考文件。
+- 按 Tavily 官方接口改为 Bearer 鉴权，密钥不再放入请求正文；保留未配置、失败和超时的独立降级。
+- 更新使用文档，说明张弓默认目录、联网搜索密钥配置与状态判断。
+
+### Testing
+
+- 张弓适配器与本地安装定向测试：20/20 通过。
+- 联网搜索、教练适配器与服务定向测试：28/28 通过。
+- `npm run typecheck`：通过。
+- PowerShell 安装脚本解析：通过。
+- 真实张弓仓库适配器：状态 `ready`，加载 `02-选词填空SOP.md`，提示上下文长度 7992。
+- `git diff --check`：通过，仅有 Windows 换行提示。
+- 当前机器未提供 `TAVILY_API_KEY`，因此未执行真实 Tavily 成功请求；请求契约已用模拟 200、401 和未配置场景验证。
+
+### Notes
+
+- `scripts/setup-coach-local.ps1`：新增张弓言语仓库的浅克隆与快进更新。
+- `server/coach/zhangGong.ts`：增加项目本地张弓 Skill 的默认发现。
+- `server/coach/webSearch.ts`：切换为 Tavily Bearer 鉴权并从正文移除密钥。
+- `tests/server/coach-adapters.test.ts`：覆盖张弓默认目录发现。
+- `tests/server/coach-local-setup.test.ts`：覆盖张弓仓库安装位置。
+- `tests/server/coach-web-search.test.ts`：覆盖 Tavily 配置、鉴权正文和降级。
+- `docs/AI公考教练.md`：补充张弓与联网搜索的安装和配置说明。
+- `progress.md`：追加本轮实现、验证和回滚记录。
+- 回滚点：本轮提交完成后执行 `git revert <本轮提交SHA>`；停止服务后可删除明确目录 `local-tools/skills/zhang-gong-yanyu`。本轮未修改数据库或用户卡片；`.env` 因没有 Tavily 密钥未写入该项。

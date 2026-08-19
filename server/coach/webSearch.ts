@@ -65,10 +65,12 @@ export function createWebSearchAdapter(options: WebSearchAdapterOptions): WebSea
     try {
       const response = await fetchImpl(TAVILY_URL, {
         method: 'POST',
-        headers: { 'content-type': 'application/json' },
+        headers: {
+          authorization: `Bearer ${apiKey}`,
+          'content-type': 'application/json',
+        },
         signal: controller.signal,
         body: JSON.stringify({
-          api_key: apiKey,
           query,
           search_depth: 'basic',
           max_results: 5,

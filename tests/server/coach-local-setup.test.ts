@@ -20,6 +20,13 @@ describe('本地公考教练依赖安装脚本', () => {
     expect(script).toMatch(/-Branch 'main'[\s\S]*huasheng-mcp/);
   });
 
+  it('将张弓言语 Skill 浅克隆到适配器可读取的项目本地目录', () => {
+    const script = readSetupScript();
+
+    expect(script).toContain('https://github.com/su8023/zhang-gong-yanyu-master.git');
+    expect(script).toMatch(/-Branch 'main'[\s\S]*skills\\zhang-gong-yanyu/);
+  });
+
   it('按需创建本地虚拟环境并从 MCP 源码安装 SSE 扩展', () => {
     const script = readSetupScript();
 

@@ -61,7 +61,8 @@ function safeError(error: unknown): ZhangGongError {
 }
 
 export function createZhangGongAdapter(options: ZhangGongAdapterOptions): ZhangGongAdapter {
-  const directory = options.directory;
+  const directory = options.directory
+    ?? join(process.cwd(), 'local-tools', 'skills', 'zhang-gong-yanyu');
   const skillPath = directory ? join(directory, 'SKILL.md') : undefined;
 
   const getStatus = async (): Promise<CoachCapabilityState> => {

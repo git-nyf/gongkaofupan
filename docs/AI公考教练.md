@@ -34,7 +34,7 @@ TAVILY_API_KEY=你的密钥
 
 - DeepSeek 是对话编排能力，缺少 `DEEPSEEK_API_KEY` 时无法生成教练回答。
 - 花生十三 MCP 提供判断、资料和数量的方法卡及解题脚手架。
-- 张弓 Skill 是用户本机私有资料。项目只读取配置目录中的必要内容，不复制、提交或向前端暴露课程原文与本机路径。
+- 张弓 Skill 使用项目本地 `local-tools/skills/zhang-gong-yanyu`；项目只读取必要的 `SKILL.md` 和对应题型参考文件，不复制、提交或向前端暴露课程原文与本机路径。也可以通过 `ZHANG_GONG_SKILL_DIR` 指向你自己的授权目录，显式目录优先。
 - Tavily 提供可选的联网题源搜索。未配置时仍可使用核心解析。
 
 ## 启动花生十三 MCP
@@ -43,6 +43,7 @@ TAVILY_API_KEY=你的密钥
 
 ```text
 local-tools/skills/huasheng13/   花生十三 Skill 本地副本
+local-tools/skills/zhang-gong-yanyu/ 张弓言语 Skill 本地副本
 local-tools/huasheng-mcp/        花生十三 MCP 源码本地副本
 local-tools/.venv/               项目专用 Python 环境
 ```
@@ -53,7 +54,7 @@ local-tools/.venv/               项目专用 Python 环境
 .\scripts\setup-coach-local.ps1
 ```
 
-该脚本会把花生十三 Skill 与 MCP 浅克隆到 `local-tools/`，创建项目专用 Python 环境并安装 SSE 依赖。再次运行时只做快进更新，不覆盖来源不明的同名目录；同时会幂等修正当前上游版本的 `question_text` 路由兼容问题。
+该脚本会把花生十三 Skill、花生 MCP 和张弓言语 Skill 浅克隆到 `local-tools/`，创建项目专用 Python 环境并安装 SSE 依赖。再次运行时只做快进更新，不覆盖来源不明的同名目录；同时会幂等修正当前上游版本的 `question_text` 路由兼容问题。
 
 本项目提供了 Windows 启动脚本，推荐直接运行：
 
@@ -71,7 +72,19 @@ local-tools/.venv/Scripts/python.exe -m uvicorn mcp_server.server:app --host 127
 
 ## 张弓 Skill
 
-本次公开检索没有找到能够确认来源、目录契约和授权范围的张弓 Skill 或 MCP 仓库，因此项目不会下载其他言语资料冒充张弓方法。取得本人授权或自建的张弓 Skill 后，将其放在项目本地目录，并把 `ZHANG_GONG_SKILL_DIR` 指向包含 `SKILL.md` 的目录；在此之前，言语理解会保持“未配置”，不会影响花生十三负责的判断推理、资料分析和数量关系。
+项目已支持并默认拉取 [张弓言语 Skill](https://github.com/su8023/zhang-gong-yanyu-master) 到 `local-tools/skills/zhang-gong-yanyu`。该目录包含根部 `SKILL.md` 和 `references/` 下的中心理解、选词填空、语句表达等方法文件。未设置 `ZHANG_GONG_SKILL_DIR` 时，服务会自动发现这个项目本地目录；显式配置目录时则优先使用显式目录。
+
+执行安装脚本并重启服务后，页面状态中的“张弓言语”应显示为“可用”。如果目录缺少 `SKILL.md`，状态会保持“未配置”，不会用花生十三方法替代言语理解。
+
+## 联网搜索
+
+联网搜索使用 Tavily 官方搜索接口。先在 `.env` 写入你自己的密钥，不要提交到 Git：
+
+```dotenv
+TAVILY_API_KEY=tvly-你的密钥
+```
+
+服务会使用 `Authorization: Bearer <密钥>` 请求 `https://api.tavily.com/search`，密钥不会放进请求正文。配置后重启服务，页面状态中的“联网搜索”显示“可用”；搜索失败或超时只会降级为无联网来源，不影响花生十三和张弓的本地方法解析。
 
 ## 能力状态
 

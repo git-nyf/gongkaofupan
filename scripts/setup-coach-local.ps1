@@ -92,6 +92,11 @@ Sync-GitRepository `
   -Branch 'main' `
   -Destination (Join-Path $localToolsRoot 'huasheng-mcp')
 
+Sync-GitRepository `
+  -RepositoryUrl 'https://github.com/su8023/zhang-gong-yanyu-master.git' `
+  -Branch 'main' `
+  -Destination (Join-Path $localToolsRoot 'skills\zhang-gong-yanyu')
+
 Update-HuashengRouteAdapter -RepositoryRoot $mcpRoot
 
 if (-not (Test-Path -LiteralPath $venvPython)) {

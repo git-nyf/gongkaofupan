@@ -226,6 +226,26 @@ describe('教练外部能力适配器', () => {
     await expect(adapter.load('语句排序题')).rejects.toMatchObject({ code: 'not_configured' });
   });
 
+  it('未设环境变量时使用项目本地的张弓 Skill', async () => {
+    const projectDirectory = await mkdtemp(join(tmpdir(), 'coach-project-'));
+    const skillDirectory = join(projectDirectory, 'local-tools', 'skills', 'zhang-gong-yanyu');
+    await mkdir(join(skillDirectory, 'references'), { recursive: true });
+    await writeFile(join(skillDirectory, 'SKILL.md'), '张弓本地默认');
+    await writeFile(join(skillDirectory, 'references', '01-中心理解SOP.md'), '中心理解方法');
+    const cwdSpy = vi.spyOn(process, 'cwd').mockReturnValue(projectDirectory);
+
+    try {
+      const adapter = createZhangGongAdapter({});
+
+      await expect(adapter.getStatus()).resolves.toBe('ready');
+      const context = await adapter.load('请判断这道中心理解题');
+      expect(context.promptContext).toContain('张弓本地默认');
+      expect(context.promptContext).toContain('中心理解方法');
+    } finally {
+      cwdSpy.mockRestore();
+    }
+  });
+
   it('Tavily 只保留 HTTPS 来源并限制为三条', async () => {
     const fetchImpl = vi.fn<typeof fetch>(async () => new Response(JSON.stringify({
       results: [
