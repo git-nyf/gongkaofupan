@@ -5000,3 +5000,26 @@
 - `tests/frontend/app-shell.test.tsx`、`tests/frontend/coach-route.test.tsx`：覆盖导航顺序、链接和路由渲染。
 - `docs/AI公考教练.md`：新增中文配置与使用说明。
 - 回滚方式：反向应用提交 `74c5820`，恢复入口文件并删除路由测试与使用文档；本轮未修改数据库、用户卡片或本机私有 `.env`。
+
+## 2026-08-19 - Task: 完成 AI 公考教练浏览器验收
+### What was done
+
+- 在临时后端端口启动本分支服务，确认教练状态接口可被前端代理读取。
+- 验收桌面端与移动端响应式布局，确认导航高亮、能力状态、题型切换、题目输入和发送按钮状态正常。
+- 保存桌面端与移动端验收截图，确认页面在窄屏下不产生横向溢出。
+
+### Testing
+
+- `npm test -- --run`：66 个测试文件、914 项测试全部通过。
+- `npm run typecheck`：通过。
+- `npm run build`：客户端与服务端构建通过，仅保留既有大包体积提示。
+- Playwright 桌面端 `1280px`：`document.body.scrollWidth === document.body.clientWidth`，教练导航高亮且 `/api/coach/status` 返回 200。
+- Playwright 移动端 `390px`：文档宽度与视口一致，题型切换为“言语理解”并成功填入题目。
+- `git diff --check`：通过。
+
+### Notes
+
+- `output/playwright/coach-desktop.png`：保存桌面端教练页面验收截图。
+- `output/playwright/coach-mobile.png`：保存移动端教练页面验收截图。
+- `progress.md`：追加本轮浏览器验收证据与回滚说明。
+- 回滚方式：反向应用提交 `cdbbc0f` 及其之前本轮教练功能提交，删除教练页面、服务、适配器、测试与文档；本轮未修改数据库、用户卡片或本机私有 `.env`。
