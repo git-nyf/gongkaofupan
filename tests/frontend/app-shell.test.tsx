@@ -18,6 +18,7 @@ const navigationRoutes = [
   { label: '总览', path: '/', heading: '总览' },
   { label: '录入', path: '/entry', heading: '录入' },
   { label: '背诵', path: '/study', heading: '背诵' },
+  { label: '教练', path: '/coach', heading: 'AI 公考教练' },
   { label: '卡片库', path: '/cards', heading: '卡片库' },
   { label: '复盘', path: '/review', heading: '错题积累' },
   { label: '申论', path: '/shenlun', heading: '申论' },

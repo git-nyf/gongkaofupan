@@ -1,6 +1,7 @@
 import { BrowserRouter, Route, Routes } from 'react-router-dom';
 import { AppShell } from './components/AppShell';
 import { CardsPage } from './pages/CardsPage';
+import { CoachPage } from './pages/CoachPage';
 import { DashboardPage } from './pages/DashboardPage';
 import { EntryPage } from './pages/EntryPage';
 import { GraphsPage } from './pages/GraphsPage';
@@ -17,6 +18,7 @@ export default function App() {
           <Route path="/" element={<DashboardPage />} />
           <Route path="/entry" element={<EntryPage />} />
           <Route path="/study" element={<StudyPage />} />
+          <Route path="/coach" element={<CoachPage />} />
           <Route path="/cards" element={<CardsPage />} />
           <Route path="/graphs" element={<GraphsPage />} />
           <Route path="/review" element={<ReviewPage />} />
