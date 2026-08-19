@@ -149,6 +149,78 @@ describe('AI 公考教练页面', () => {
     ]);
   });
 
+  it('连续追问超过十轮时保留原题并将请求消息裁剪到服务端上限', async () => {
+    const requests: Array<{ messages: Array<{ role: string; content: string }> }> = [];
+    vi.mocked(fetch).mockImplementation(async (input, init) => {
+      if (String(input) === '/api/coach/status') return jsonResponse(readyStatus);
+      if (String(input) === '/api/coach/messages') {
+        requests.push(JSON.parse(String(init?.body)) as typeof requests[number]);
+        return jsonResponse(coachResponse);
+      }
+      throw new Error(`unexpected request: ${String(input)}`);
+    });
+    const user = userEvent.setup();
+    render(<CoachPage />);
+    const input = screen.getByRole('textbox', { name: '输入题目或追问' });
+
+    await user.type(input, '原始题目');
+    fireEvent.keyDown(input, { key: 'Enter', ctrlKey: true });
+    await waitFor(() => expect(requests).toHaveLength(1));
+
+    for (let round = 1; round <= 10; round += 1) {
+      await user.type(input, `追问${round}`);
+      fireEvent.keyDown(input, { key: 'Enter', ctrlKey: true });
+      await waitFor(() => expect(requests).toHaveLength(round + 1));
+    }
+
+    const lastRequest = requests.at(-1)!;
+    expect(lastRequest.messages).toHaveLength(20);
+    expect(lastRequest.messages[0]).toEqual({ role: 'user', content: '原始题目' });
+    expect(lastRequest.messages.at(-1)).toEqual({ role: 'user', content: '追问10' });
+  });
+
+  it('DeepSeek 未就绪时禁用发送，并按当前题型禁用对应方法源', async () => {
+    const unavailableStatus: CoachStatus = {
+      deepseek: 'not_configured',
+      huasheng: 'not_configured',
+      zhangGong: 'ready',
+      webSearch: 'ready',
+    };
+    vi.mocked(fetch).mockImplementation(async (input) => {
+      if (String(input) === '/api/coach/status') return jsonResponse(unavailableStatus);
+      throw new Error(`unexpected request: ${String(input)}`);
+    });
+    const user = userEvent.setup();
+    render(<CoachPage />);
+    const input = screen.getByRole('textbox', { name: '输入题目或追问' });
+    await user.type(input, '题目');
+
+    expect(await screen.findByText('DeepSeek 尚未配置，暂不能发送')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '发送' })).toBeDisabled();
+
+    const modes = screen.getByRole('radiogroup', { name: '题型模式' });
+    await user.click(within(modes).getByRole('radio', { name: '言语理解' }));
+    expect(screen.getByText('DeepSeek 尚未配置，暂不能发送')).toBeInTheDocument();
+
+    const verbalOnlyUnavailable: CoachStatus = {
+      deepseek: 'ready',
+      huasheng: 'ready',
+      zhangGong: 'unavailable',
+      webSearch: 'ready',
+    };
+    vi.mocked(fetch).mockImplementation(async (input) => {
+      if (String(input) === '/api/coach/status') return jsonResponse(verbalOnlyUnavailable);
+      throw new Error(`unexpected request: ${String(input)}`);
+    });
+    cleanup();
+    render(<CoachPage />);
+    const verbalInput = screen.getByRole('textbox', { name: '输入题目或追问' });
+    await user.type(verbalInput, '言语题');
+    await user.click(within(screen.getByRole('radiogroup', { name: '题型模式' })).getByRole('radio', { name: '言语理解' }));
+    expect(await screen.findByText('张弓方法源暂不可用，当前模式不能发送')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '发送' })).toBeDisabled();
+  });
+
   it('请求期间禁止重复发送，Escape 中止且保留草稿', async () => {
     const request = deferredResponse();
     let requestSignal: AbortSignal | null = null;

@@ -35,6 +35,8 @@ const statusNames: Array<{ key: keyof CoachStatus; label: string }> = [
 
 type ChatMessage = CoachConversationMessage;
 
+const MAX_COACH_MESSAGES = 20;
+
 export function CoachPage() {
   const [status, setStatus] = useState<CoachStatus | null>(null);
   const [mode, setMode] = useState<CoachMode>('auto');
@@ -49,6 +51,7 @@ export function CoachPage() {
   const [selectedCard, setSelectedCard] = useState<CardDetail | null>(null);
   const controllerRef = useRef<AbortController | null>(null);
   const composingRef = useRef(false);
+  const availabilityReason = getCoachAvailabilityReason(status, mode);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -102,8 +105,8 @@ export function CoachPage() {
 
   const send = async () => {
     const content = draft.trim();
-    if (!content || requestState === 'sending') return;
-    const nextMessages: ChatMessage[] = [...messages, { role: 'user', content }];
+    if (!content || requestState === 'sending' || availabilityReason) return;
+    const nextMessages = trimCoachMessages([...messages, { role: 'user', content }]);
     setMessages(nextMessages);
     setResponse(null);
     setRequestMessage('');
@@ -197,8 +200,9 @@ export function CoachPage() {
             <div className="coach-composer__footer">
               <label className="coach-search-toggle"><input aria-label="联网搜索" checked={includeWebSearch} onChange={(event) => setIncludeWebSearch(event.target.checked)} type="checkbox" />联网搜索</label>
               <span>{draft.length} / 10000</span>
-              <button aria-label={requestState === 'sending' ? '正在发送' : '发送'} className="coach-send" disabled={requestState === 'sending' || !draft.trim()} onClick={() => void send()} type="button"><SendHorizontal aria-hidden="true" size={16} />{requestState === 'sending' ? '正在发送' : '发送'}</button>
+              <button aria-label={requestState === 'sending' ? '正在发送' : '发送'} className="coach-send" disabled={requestState === 'sending' || !draft.trim() || Boolean(availabilityReason)} onClick={() => void send()} type="button"><SendHorizontal aria-hidden="true" size={16} />{requestState === 'sending' ? '正在发送' : '发送'}</button>
             </div>
+            {availabilityReason ? <p className="coach-feedback" role="status">{availabilityReason}</p> : null}
             {requestMessage ? <p className="coach-feedback" role="status">{requestMessage}</p> : null}
           </div>
         </section>
@@ -227,4 +231,25 @@ function ResponseSummary({ response }: { response: CoachResponse }) {
 
 function isAbortError(error: unknown) {
   return error instanceof DOMException && error.name === 'AbortError';
+}
+
+function trimCoachMessages(messages: ChatMessage[]) {
+  if (messages.length <= MAX_COACH_MESSAGES) return messages;
+  const firstUserIndex = messages.findIndex(({ role }) => role === 'user');
+  if (firstUserIndex < 0) return messages.slice(-MAX_COACH_MESSAGES);
+  const firstQuestion = messages[firstUserIndex];
+  const recentStart = Math.max(firstUserIndex + 1, messages.length - (MAX_COACH_MESSAGES - 1));
+  return [firstQuestion, ...messages.slice(recentStart)].slice(-MAX_COACH_MESSAGES);
+}
+
+function getCoachAvailabilityReason(status: CoachStatus | null, mode: CoachMode) {
+  if (!status) return '正在加载教练能力，暂不能发送';
+  if (status.deepseek === 'not_configured') return 'DeepSeek 尚未配置，暂不能发送';
+  if (status.deepseek !== 'ready') return 'DeepSeek 暂不可用，暂不能发送';
+
+  const capability = mode === 'verbal' ? status.zhangGong : status.huasheng;
+  const teacher = mode === 'verbal' ? '张弓' : '花生十三';
+  if (capability === 'not_configured') return `${teacher}方法源尚未配置，当前模式不能发送`;
+  if (capability !== 'ready') return `${teacher}方法源暂不可用，当前模式不能发送`;
+  return null;
 }
