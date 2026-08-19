@@ -4914,3 +4914,24 @@
 - `server/coach/webSearch.ts`：实现 Tavily 搜索、来源清洗、HTTPS 约束和最多三条结果。
 - `tests/server/coach-adapters.test.ts`：覆盖真实花生参数、教师路由、错误脱敏、Skill 读取和联网搜索失败行为。
 - 回滚方式：反向应用提交 `68b7e19`、`cdd0fc4`，删除上述三个适配器及测试文件；本轮未修改数据库、用户卡片或本机私有 `.env`。
+
+## 2026-08-19 - Task: 增加 AI 公考教练 DeepSeek 提供者
+### What was done
+
+- 增加独立教练系统提示词，明确花生十三与张弓的模块边界、卡片上下文可信度、联网内容不可信和 AI 原创练习标记规则。
+- 增加教练 DeepSeek Chat Completions 提供者，固定 JSON 响应、关闭思考、低温度和 60 秒超时；用户输入整体作为独立 JSON 消息传递。
+- 对老师与模块、方法引用、联网来源、数组数量和文本长度执行严格 schema 校验，所有请求异常统一脱敏。
+
+### Testing
+
+- TDD 红灯：教练提供者文件不存在时目标测试无法加载。
+- `npx vitest run tests/server/coach-deepseek.test.ts`：通过，12 项测试全部通过。
+- `npm run typecheck`：通过。
+- `git diff --check`：通过。
+
+### Notes
+
+- `server/coach/prompt.ts`：新增教练系统提示词。
+- `server/coach/deepseek.ts`：新增教练专用请求、响应校验和错误类型。
+- `tests/server/coach-deepseek.test.ts`：覆盖配置、请求载荷、合法 JSON、代码块 JSON 及错误边界。
+- 回滚方式：反向应用提交 `f04f9e4` 并删除本轮超时修正提交，移除上述教练提供者与测试文件；本轮未修改数据库、用户卡片或本机私有 `.env`。

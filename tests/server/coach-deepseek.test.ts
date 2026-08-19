@@ -73,7 +73,7 @@ describe('DeepSeek 教练提供者', () => {
     await provider.respond(input);
 
     expect(provider.isConfigured()).toBe(true);
-    expect(timeoutSpy).toHaveBeenCalledWith(90_000);
+    expect(timeoutSpy).toHaveBeenCalledWith(60_000);
     expect(fetchMock).toHaveBeenCalledTimes(1);
     const [url, init] = fetchMock.mock.calls[0]!;
     expect(url).toBe('https://api.deepseek.com/chat/completions');

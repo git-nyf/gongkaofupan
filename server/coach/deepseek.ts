@@ -125,7 +125,7 @@ export function createCoachDeepSeekProvider(
                 { role: 'user', content: JSON.stringify(input) },
               ],
             }),
-            signal: AbortSignal.timeout(90_000),
+            signal: AbortSignal.timeout(60_000),
           },
         );
       } catch (error) {
