@@ -5108,3 +5108,23 @@
 - `docs/AI公考教练.md`：补充张弓与联网搜索的安装和配置说明。
 - `progress.md`：追加本轮实现、验证和回滚记录。
 - 回滚点：本轮提交完成后执行 `git revert <本轮提交SHA>`；停止服务后可删除明确目录 `local-tools/skills/zhang-gong-yanyu`。本轮未修改数据库或用户卡片；`.env` 因没有 Tavily 密钥未写入该项。
+
+## 2026-08-20 - Task: 启用 Tavily 联网搜索并验收 8787
+
+### What was done
+
+- 读取本机 `.env` 中用户已填写的 `TAVILY_API_KEY`，未输出、提交或写入前端代码。
+- 重启 `8787` 使服务加载新密钥；张弓言语与联网搜索均纳入当前生产进程。
+
+### Testing
+
+- `.env` 密钥存在性和 `tvly-` 格式检查通过，实际值未显示。
+- `GET /api/coach/status`：DeepSeek、花生十三、张弓言语、联网搜索均为 `ready`。
+- 真实 `POST /api/coach/messages` 联网请求：返回 `webSearchStatus=ready`、2 个 HTTPS 来源，并完成结构化回答。
+- Playwright 访问 `http://127.0.0.1:8787/coach`：确认四项能力均显示“可用”。
+
+### Notes
+
+- `.env`：用户本地配置 Tavily Key，仍被 Git 忽略。
+- `progress.md`：追加本轮启用与实链路验收记录。
+- 回滚点：停止当前 `8787` Node 进程并恢复此前构建；删除 `.env` 中的 `TAVILY_API_KEY` 可关闭联网搜索，不影响本地教练能力。
