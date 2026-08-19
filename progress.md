@@ -4892,3 +4892,25 @@
 - `tests/server/health.test.ts`：增加配置和类型约束回归测试。
 - `progress.md`：追加本轮实现、验证与回滚说明。
 - 回滚方式：反向应用本节共享契约、配置、环境示例、依赖与测试差异，执行 `npm install` 恢复锁文件，并删除本节日志；本轮未修改数据库、用户卡片或本机私有 `.env`。
+
+## 2026-08-19 - Task: 接入公考教练外部能力适配器
+### What was done
+
+- 接入花生十三 MCP、张弓本地 Skill 与 Tavily 联网搜索适配器，统一输出方法上下文、能力状态和来源信息。
+- 花生适配器按真实工具契约调用 `question_text`、`module_guess`、方法搜索与方法卡，并对自动路由不确定、上游异常和敏感正文进行安全降级。
+- 外部来源均设置内容截断、HTTPS 来源过滤、去重和独立失败状态，确保单项能力故障不泄露上游细节。
+
+### Testing
+
+- TDD 红灯：新增真实花生 MCP 参数契约后，旧实现出现 3 项预期失败。
+- `npx vitest run tests/server/coach-adapters.test.ts`：通过，9 项测试全部通过。
+- `npm run typecheck`：通过。
+- `git diff --check`：通过。
+
+### Notes
+
+- `server/coach/huasheng.ts`：实现花生 MCP SSE 客户端、路由、解题脚手架、方法卡和安全降级。
+- `server/coach/zhangGong.ts`：按题型读取张弓 Skill 及对应引用，并限制上下文范围。
+- `server/coach/webSearch.ts`：实现 Tavily 搜索、来源清洗、HTTPS 约束和最多三条结果。
+- `tests/server/coach-adapters.test.ts`：覆盖真实花生参数、教师路由、错误脱敏、Skill 读取和联网搜索失败行为。
+- 回滚方式：反向应用提交 `68b7e19`、`cdd0fc4`，删除上述三个适配器及测试文件；本轮未修改数据库、用户卡片或本机私有 `.env`。
