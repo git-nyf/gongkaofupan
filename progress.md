@@ -4935,3 +4935,26 @@
 - `server/coach/deepseek.ts`：新增教练专用请求、响应校验和错误类型。
 - `tests/server/coach-deepseek.test.ts`：覆盖配置、请求载荷、合法 JSON、代码块 JSON 及错误边界。
 - 回滚方式：反向应用提交 `f04f9e4` 并删除本轮超时修正提交，移除上述教练提供者与测试文件；本轮未修改数据库、用户卡片或本机私有 `.env`。
+
+## 2026-08-19 - Task: 接入 AI 公考教练服务与接口
+### What was done
+
+- 完成自动与手动模块路由、老师固定分工、连续追问上下文、卡片最小上下文和联网来源编排。
+- 增加 `/api/coach/status` 与 `/api/coach/messages`，严格校验消息数量、长度、角色和未知字段，并使用固定安全错误响应。
+- 在生产入口创建独立教练提供者及三类外部适配器，未改变现有卡片整理 DeepSeek 链路。
+
+### Testing
+
+- TDD 红灯：服务和路由文件不存在时两组目标测试无法加载。
+- `npx vitest run tests/server/coach-service.test.ts tests/server/coach-routes.test.ts`：通过，24 项测试全部通过。
+- `npx vitest run tests/server/coach-service.test.ts tests/server/coach-routes.test.ts tests/server/coach-deepseek.test.ts tests/server/deepseek.test.ts tests/server/health.test.ts`：通过，77 项测试全部通过。
+- `npm run typecheck`：通过。
+- `git diff --check`：通过。
+
+### Notes
+
+- `server/coach/service.ts`：新增老师路由、卡片与搜索上下文编排及稳定错误类型。
+- `server/coach/routes.ts`、`server/coach/index.ts`：新增严格 HTTP 契约与模块出口。
+- `server/app.ts`、`server/index.ts`：挂载教练路由并创建生产依赖。
+- `tests/server/coach-service.test.ts`、`tests/server/coach-routes.test.ts`：覆盖路由分工、上下文边界、降级和接口错误映射。
+- 回滚方式：反向应用提交 `27d5ec0`，恢复服务端入口并删除教练服务、路由与测试；本轮未修改数据库、用户卡片或本机私有 `.env`。
