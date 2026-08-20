@@ -61,6 +61,28 @@ describe('教练外部能力适配器', () => {
     await expect(adapter.getStatus()).resolves.toBe('ready');
   });
 
+  it('花生服务恢复后重新探测，不缓存之前的 unavailable', async () => {
+    let attempts = 0;
+    const adapter = createHuashengAdapter({
+      url: 'http://127.0.0.1:8000/sse',
+      clientFactory: async () => {
+        attempts += 1;
+        return {
+          listTools: async () => {
+            if (attempts === 1) throw new Error('MCP temporarily unavailable');
+            return [{ name: 'route_xingce_question' }];
+          },
+          callTool: async () => undefined,
+          close: async () => undefined,
+        };
+      },
+    });
+
+    await expect(adapter.getStatus()).resolves.toBe('unavailable');
+    await expect(adapter.getStatus()).resolves.toBe('ready');
+    expect(attempts).toBe(2);
+  });
+
   it('花生手动数量模式按真实契约顺序请求脚手架、方法和方法卡', async () => {
     const calls: Array<{ name: string; args: Record<string, unknown> }> = [];
     const adapter = createHuashengAdapter({
@@ -180,8 +202,14 @@ describe('教练外部能力适配器', () => {
   it('花生工具错误只暴露 unavailable，不泄露上游正文', async () => {
     const adapter = createHuashengAdapter({
       url: 'http://127.0.0.1:8000/sse',
-      clientFactory: async () => fakeMcp(async () => {
-        throw new Error('上游秘密正文：internal stack trace');
+      clientFactory: async () => ({
+        listTools: async () => {
+          throw new Error('上游秘密正文：internal stack trace');
+        },
+        callTool: async () => {
+          throw new Error('上游秘密正文：internal stack trace');
+        },
+        close: async () => undefined,
       }),
     });
 

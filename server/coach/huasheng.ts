@@ -305,7 +305,6 @@ export function createHuashengAdapter(options: HuashengAdapterOptions): Huasheng
     isConfigured: () => Boolean(options.url),
     getStatus: async () => {
       if (!options.url) return 'not_configured';
-      if (lastStatus === 'unavailable') return lastStatus;
       try {
         const client = await withTimeout(Promise.resolve(clientFactory()));
         try {

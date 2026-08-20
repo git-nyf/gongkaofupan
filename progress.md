@@ -5128,3 +5128,28 @@
 - `.env`：用户本地配置 Tavily Key，仍被 Git 忽略。
 - `progress.md`：追加本轮启用与实链路验收记录。
 - 回滚点：停止当前 `8787` Node 进程并恢复此前构建；删除 `.env` 中的 `TAVILY_API_KEY` 可关闭联网搜索，不影响本地教练能力。
+
+## 2026-08-20 - Task: 修复花生 MCP 重启后状态仍不可用
+
+### What was done
+
+- 重新启动本地花生 MCP，确认报错原因是 `8000` 服务停止而不是题目或密钥问题。
+- 修复花生适配器缓存首次 `unavailable` 后不再探测的问题；状态接口现在每次都会检查当前 MCP，可在服务恢复后自动回到 `ready`。
+- 更新使用文档，说明 MCP 掉线后的恢复方式。
+
+### Testing
+
+- TDD 红灯：新增“服务恢复后重新探测”测试，旧实现第二次仍返回 `unavailable`。
+- 教练适配器、服务、路由、DeepSeek 和前端页面回归：5 个测试文件、63 项全部通过。
+- `npm run typecheck`：通过。
+- `npm run build`：客户端与服务端构建通过，仅保留既有大包提示。
+- 真实数量题：返回花生十三老师、答案 `B.6天` 和 7 个步骤。
+- `git diff --check`：通过，仅有 Windows 换行提示。
+
+### Notes
+
+- `server/coach/huasheng.ts`：移除不可用状态的永久短路，恢复实时健康探测。
+- `tests/server/coach-adapters.test.ts`：增加掉线恢复回归，并让原有错误夹具同时模拟健康探测失败。
+- `docs/AI公考教练.md`：补充 MCP 恢复说明。
+- `progress.md`：追加本轮实现、验证和回滚记录。
+- 回滚点：反向应用本轮提交并重启 `8787`；停止 `scripts/start-huasheng-mcp.ps1` 对应进程可复现原始不可用状态。本轮未修改数据库、卡片或 `.env`。
