@@ -9,6 +9,7 @@
     "build:client": "vite build --outDir dist/client",
     "build:server": "tsup server/index.ts --format esm --target node22 --out-dir dist-server --clean",
     "start": "cross-env NODE_ENV=production node dist-server/index.js",
+    "start:coach": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/start-coach-local.ps1",
     "anki:daily": "tsx server/anki/cli.ts",
     "test": "vitest run",
     "test:watch": "vitest",

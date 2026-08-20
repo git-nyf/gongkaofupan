@@ -5153,3 +5153,28 @@
 - `docs/AI公考教练.md`：补充 MCP 恢复说明。
 - `progress.md`：追加本轮实现、验证和回滚记录。
 - 回滚点：反向应用本轮提交并重启 `8787`；停止 `scripts/start-huasheng-mcp.ps1` 对应进程可复现原始不可用状态。本轮未修改数据库、卡片或 `.env`。
+
+## 2026-08-20 - Task: 增加公考教练一键启动与配置自检
+
+### What was done
+
+- 增加 `npm run start:coach` 一键入口：默认复用本地依赖，仅在缺失时安装；自动拉起花生 MCP 和项目后端，并等待健康接口。
+- 启动时检查 DeepSeek、花生十三、张弓言语和 Tavily 四项状态；现有 `8787` 状态不完整时自动重启以重新加载 `.env`，状态完整时保持现有进程。
+- 增加 `-Sync` 模式，主动同步三个 GitHub 来源并重建前后端；日常启动不受 GitHub 瞬时网络波动影响。
+
+### Testing
+
+- TDD 红灯：启动脚本不存在时 3 项测试失败。
+- 启动脚本契约：3/3 通过。
+- PowerShell 解析：通过。
+- `npm run typecheck`：通过。
+- 真实执行 `powershell -File scripts/start-coach-local.ps1`：退出码 0，打印四项 `ready`，入口为 `http://127.0.0.1:8787/coach`。
+
+### Notes
+
+- `scripts/start-coach-local.ps1`：新增依赖检查、MCP/后端拉起、状态重试和旧配置进程重启。
+- `tests/server/coach-local-start.test.ts`：覆盖一键启动、按需安装、显式同步和入口脚本契约。
+- `package.json`：新增 `start:coach` 命令。
+- `docs/AI公考教练.md`：补充日常启动和主动同步命令。
+- `progress.md`：追加本轮实现、验证和回滚记录。
+- 回滚点：执行 `git revert <本轮提交SHA>`，停止由启动器拉起的 `8000`/`8787` 进程；本轮未修改数据库、卡片或密钥内容。

@@ -56,6 +56,18 @@ local-tools/.venv/               项目专用 Python 环境
 
 该脚本会把花生十三 Skill、花生 MCP 和张弓言语 Skill 浅克隆到 `local-tools/`，创建项目专用 Python 环境并安装 SSE 依赖。再次运行时只做快进更新，不覆盖来源不明的同名目录；同时会幂等修正当前上游版本的 `question_text` 路由兼容问题。
 
+日常启动推荐使用一键入口：
+
+```powershell
+npm run start:coach
+```
+
+它会自动检查本地 Skill、Python 环境、花生 MCP、DeepSeek、张弓和 Tavily 状态；缺少本地依赖时自动安装，`8000` 或 `8787` 未启动时自动拉起，发现旧进程配置不完整时自动重启。需要主动同步三个 GitHub 来源并重新构建时，使用：
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/start-coach-local.ps1 -Sync
+```
+
 本项目提供了 Windows 启动脚本，推荐直接运行：
 
 ```powershell
